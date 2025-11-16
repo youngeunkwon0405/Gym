@@ -12,9 +12,9 @@ NUM_WORKERS=$6
 DATASET=$7
 SPLIT=$8
 EVAL_OUTPUT_DIR=${9}
-N_RUNS=${10}
-MODE=${11}
-
+SELECTED_ID=${10}
+N_RUNS=${11}
+MODE=${12}
 
 if [ -z "$NUM_WORKERS" ]; then
   NUM_WORKERS=1
@@ -75,6 +75,7 @@ echo "COMMIT_HASH: $COMMIT_HASH"
 echo "MODE: $MODE"
 echo "EVAL_CONDENSER: $EVAL_CONDENSER"
 echo "EVAL_OUTPUT_DIR: $EVAL_OUTPUT_DIR"
+echo "SELECTED_ID: $SELECTED_ID"
 
 # Default to NOT use Hint
 if [ -z "$USE_HINT_TEXT" ]; then
@@ -122,6 +123,11 @@ function run_eval() {
   if [ -n "$EVAL_LIMIT" ]; then
     echo "EVAL_LIMIT: $EVAL_LIMIT"
     COMMAND="$COMMAND --eval-n-limit $EVAL_LIMIT"
+  fi
+
+  if [ -n "$SELECTED_ID" ]; then
+    echo "SELECTED_ID: $SELECTED_ID"
+    COMMAND="$COMMAND --selected-id \"$SELECTED_ID\""
   fi
 
   # Run the command

@@ -713,36 +713,29 @@ def process_instance(
     return output
 
 
-def filter_dataset(dataset: pd.DataFrame, filter_column: str) -> pd.DataFrame:
-    file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.toml')
-    if os.path.exists(file_path):
-        with open(file_path, 'r') as file:
-            data = toml.load(file)
-            if 'selected_ids' in data:
-                selected_ids = data['selected_ids']
-                logger.info(
-                    f'Filtering {len(selected_ids)} tasks from "selected_ids"...'
-                )
-                subset = dataset[dataset[filter_column].isin(selected_ids)]
-                logger.info(f'Retained {subset.shape[0]} tasks after filtering')
-                return subset
-            if 'selected_repos' in data:
-                # repos for the swe-bench instances:
-                # ['astropy/astropy', 'django/django', 'matplotlib/matplotlib', 'mwaskom/seaborn', 'pallets/flask', 'psf/requests', 'pydata/xarray', 'pylint-dev/pylint', 'pytest-dev/pytest', 'scikit-learn/scikit-learn', 'sphinx-doc/sphinx', 'sympy/sympy']
-                selected_repos = data['selected_repos']
-                if isinstance(selected_repos, str):
-                    selected_repos = [selected_repos]
-                assert isinstance(selected_repos, list)
-                logger.info(
-                    f'Filtering {selected_repos} tasks from "selected_repos"...'
-                )
-                subset = dataset[dataset['repo'].isin(selected_repos)]
-                logger.info(f'Retained {subset.shape[0]} tasks after filtering')
-                return subset
+def filter_dataset(
+    dataset: pd.DataFrame,
+    filter_column: str,
+    selected_ids: list[str] | None = None,
+) -> pd.DataFrame:
+    # First check command-line args, then fall back to config.toml
+    if selected_ids is None:
+        file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.toml')
+        if os.path.exists(file_path):
+            with open(file_path, 'r') as file:
+                data = toml.load(file)
+                if 'selected_ids' in data:
+                    selected_ids = data['selected_ids']
+
+    if selected_ids:
+        logger.info(f'Filtering {len(selected_ids)} tasks from selected_ids...')
+        subset = dataset[dataset[filter_column].isin(selected_ids)]
+        logger.info(f'Retained {subset.shape[0]} tasks after filtering')
+        return subset
 
     skip_ids = os.environ.get('SKIP_IDS', '').split(',')
-    if len(skip_ids) > 0:
-        logger.info(f'Filtering {len(skip_ids)} tasks from "SKIP_IDS"...')
+    if len(skip_ids) > 0 and skip_ids[0]:
+        logger.info(f'Filtering {len(skip_ids)} tasks from SKIP_IDS...')
         return dataset[~dataset[filter_column].isin(skip_ids)]
     return dataset
 
@@ -768,6 +761,12 @@ if __name__ == '__main__':
         choices=['swe', 'swt', 'swt-ci'],
         help="mode to run the evaluation, either 'swe', 'swt', or 'swt-ci'",
     )
+    parser.add_argument(
+        '--selected-id',
+        type=str,
+        default=None,
+        help='Single instance ID to evaluate (e.g., "django__django-12345")',
+    )
 
     args, _ = parser.parse_known_args()
 
@@ -778,7 +777,10 @@ if __name__ == '__main__':
     # Set the global dataset type based on dataset name
     set_dataset_type(args.dataset)
 
-    swe_bench_tests = filter_dataset(dataset.to_pandas(), 'instance_id')
+    # Parse selected_id from args
+    selected_ids = [args.selected_id] if args.selected_id else None
+
+    swe_bench_tests = filter_dataset(dataset.to_pandas(), 'instance_id', selected_ids)
     logger.info(
         f'Loaded dataset {args.dataset} with split {args.split}: {len(swe_bench_tests)} tasks'
     )
