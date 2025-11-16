@@ -342,6 +342,15 @@ class LLM(RetryMixin, DebugMixin):
             response_id = resp.get('id', 'unknown')
             self.metrics.add_response_latency(latency, response_id)
 
+            # Extract provider_specific_fields from the response
+            if hasattr(resp.choices[0].message, 'provider_specific_fields'):
+                provider_specific_fields = resp.choices[0].message.provider_specific_fields
+                # Store provider_specific_fields on the response for later use
+                if not hasattr(resp, '_provider_specific_fields'):
+                    resp._provider_specific_fields = provider_specific_fields
+            else:
+                provider_specific_fields = {}
+
             non_fncall_response = copy.deepcopy(resp)
 
             # if we mocked function calling, and we have tools, convert the response back to function calling format
