@@ -11,8 +11,9 @@ MAX_ITER=$5
 NUM_WORKERS=$6
 DATASET=$7
 SPLIT=$8
-N_RUNS=$9
-MODE=${10}
+EVAL_OUTPUT_DIR=${9}
+N_RUNS=${10}
+MODE=${11}
 
 
 if [ -z "$NUM_WORKERS" ]; then
@@ -73,6 +74,7 @@ echo "NUM_WORKERS: $NUM_WORKERS"
 echo "COMMIT_HASH: $COMMIT_HASH"
 echo "MODE: $MODE"
 echo "EVAL_CONDENSER: $EVAL_CONDENSER"
+echo "EVAL_OUTPUT_DIR: $EVAL_OUTPUT_DIR"
 
 # Default to NOT use Hint
 if [ -z "$USE_HINT_TEXT" ]; then
@@ -113,7 +115,9 @@ function run_eval() {
     --split $SPLIT \
     --mode $MODE"
 
-
+  if [ -n "$EVAL_OUTPUT_DIR" ]; then
+    COMMAND="$COMMAND --eval-output-dir $EVAL_OUTPUT_DIR"
+  fi
 
   if [ -n "$EVAL_LIMIT" ]; then
     echo "EVAL_LIMIT: $EVAL_LIMIT"
