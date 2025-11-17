@@ -422,6 +422,7 @@ class LLM(RetryMixin, DebugMixin):
                 _d = {
                     'messages': messages,
                     'response': resp,
+                    'provider_specific_fields': provider_specific_fields,
                     'args': args,
                     'kwargs': {
                         k: v
