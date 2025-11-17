@@ -6,6 +6,8 @@ from functools import partial
 from typing import Any, Callable, cast
 
 import httpx
+import uuid
+
 
 from openhands.core.config import LLMConfig
 from openhands.llm.metrics import Metrics
@@ -50,6 +52,8 @@ LLM_RETRY_EXCEPTIONS: tuple[type[Exception], ...] = (
     LLMNoResponseError,
 )
 
+SET_COOKIE_ID = "set-cookie"
+
 
 class LLM(RetryMixin, DebugMixin):
     """The LLM class represents a Language Model instance.
@@ -84,6 +88,10 @@ class LLM(RetryMixin, DebugMixin):
         self.model_info: ModelInfo | None = None
         self._function_calling_active: bool = False
         self.retry_listener = retry_listener
+
+        self.response_headers = None
+        self.x_client_id = str(uuid.uuid4())
+
         if self.config.log_completions:
             if self.config.log_completions_folder is None:
                 raise RuntimeError(
@@ -201,6 +209,17 @@ class LLM(RetryMixin, DebugMixin):
         if self.config.completion_kwargs is not None:
             kwargs.update(self.config.completion_kwargs)
 
+        raw_cookie = (
+                self.response_headers.get(SET_COOKIE_ID)
+                if self.response_headers and SET_COOKIE_ID in self.response_headers
+                else None
+            )
+        extra_headers = kwargs.get("extra_headers", {}).copy()
+        extra_headers["X-Client-ID"] = self.x_client_id
+        if raw_cookie:
+            cookie_value = raw_cookie.split(";")[0].strip()
+            extra_headers["Cookie"] = cookie_value
+
         self._completion = partial(
             litellm_completion,
             model=self.config.model,
@@ -213,6 +232,7 @@ class LLM(RetryMixin, DebugMixin):
             timeout=self.config.timeout,
             drop_params=self.config.drop_params,
             seed=self.config.seed,
+            extra_headers=extra_headers,
             **kwargs,
         )
 
@@ -336,6 +356,8 @@ class LLM(RetryMixin, DebugMixin):
                     category=DeprecationWarning,
                 )
                 resp: ModelResponse = self._completion_unwrapped(*args, **kwargs)
+                if not self.response_headers:
+                    self.response_headers = resp._response_headers
 
             # Calculate and record latency
             latency = time.time() - start_time
