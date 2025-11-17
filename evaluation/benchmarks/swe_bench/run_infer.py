@@ -767,20 +767,33 @@ if __name__ == '__main__':
         default=None,
         help='Single instance ID to evaluate (e.g., "django__django-12345")',
     )
+    parser.add_argument(
+        '--instance-dict',
+        type=str,
+        default=None,
+        help='JSON string containing instance data to use instead of loading from HuggingFace (e.g., \'{"instance_id": "...", "repo": "...", ...}\')',
+    )
 
     args, _ = parser.parse_known_args()
 
-    # NOTE: It is preferable to load datasets from huggingface datasets and perform post-processing
-    # so we don't need to manage file uploading to OpenHands's repo
-    dataset = load_dataset(args.dataset, split=args.split)
+    # Check if instance data is provided directly
+    if args.instance_dict:
+        instance_data = json.loads(args.instance_dict)
+        swe_bench_tests = pd.DataFrame([instance_data])
+        logger.info(f'Loaded instance from --instance-dict: {instance_data.get("instance_id", "unknown")}')
+        set_dataset_type(args.dataset)
+    else:
+        # NOTE: It is preferable to load datasets from huggingface datasets and perform post-processing
+        # so we don't need to manage file uploading to OpenHands's repo
+        dataset = load_dataset(args.dataset, split=args.split)
 
-    # Set the global dataset type based on dataset name
-    set_dataset_type(args.dataset)
+        # Set the global dataset type based on dataset name
+        set_dataset_type(args.dataset)
 
-    # Parse selected_id from args
-    selected_ids = [args.selected_id] if args.selected_id else None
+        # Parse selected_id from args
+        selected_ids = [args.selected_id] if args.selected_id else None
 
-    swe_bench_tests = filter_dataset(dataset.to_pandas(), 'instance_id', selected_ids)
+        swe_bench_tests = filter_dataset(dataset.to_pandas(), 'instance_id', selected_ids)
     logger.info(
         f'Loaded dataset {args.dataset} with split {args.split}: {len(swe_bench_tests)} tasks'
     )

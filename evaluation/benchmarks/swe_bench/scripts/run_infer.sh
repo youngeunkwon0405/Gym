@@ -13,8 +13,9 @@ DATASET=$7
 SPLIT=$8
 EVAL_OUTPUT_DIR=${9}
 SELECTED_ID=${10}
-N_RUNS=${11}
-MODE=${12}
+INSTANCE_DICT=${11}
+N_RUNS=${12}
+MODE=${13}
 
 if [ -z "$NUM_WORKERS" ]; then
   NUM_WORKERS=1
@@ -76,6 +77,7 @@ echo "MODE: $MODE"
 echo "EVAL_CONDENSER: $EVAL_CONDENSER"
 echo "EVAL_OUTPUT_DIR: $EVAL_OUTPUT_DIR"
 echo "SELECTED_ID: $SELECTED_ID"
+echo "INSTANCE_DICT: $INSTANCE_DICT"
 
 # Default to NOT use Hint
 if [ -z "$USE_HINT_TEXT" ]; then
@@ -128,6 +130,11 @@ function run_eval() {
   if [ -n "$SELECTED_ID" ]; then
     echo "SELECTED_ID: $SELECTED_ID"
     COMMAND="$COMMAND --selected-id \"$SELECTED_ID\""
+  fi
+
+  if [ -n "$INSTANCE_DICT" ]; then
+    echo "INSTANCE_DICT: Using provided instance dictionary"
+    COMMAND="$COMMAND --instance-dict $(printf %q "$INSTANCE_DICT")"
   fi
 
   # Run the command
