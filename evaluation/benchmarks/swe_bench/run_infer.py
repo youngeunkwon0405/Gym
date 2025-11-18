@@ -788,7 +788,7 @@ if __name__ == '__main__':
             ][0]
 
         # delete the instance_dict_path to avoid information leakage
-        os.remove(args.instance_dict_path)
+        # os.remove(args.instance_dict_path)
         swe_bench_tests = pd.DataFrame([instance_data])
         logger.info(f"Loaded instance from --instance-dict-path: {instance_data.get('instance_id', 'unknown')}")
         set_dataset_type(args.dataset)
@@ -807,22 +807,22 @@ if __name__ == '__main__':
     logger.info(
         f'Loaded dataset {args.dataset} with split {args.split}: {len(swe_bench_tests)} tasks'
     )
-    if DATASET_TYPE == 'SWE-Gym':
-        with open(
-            os.path.join(
-                os.path.dirname(os.path.abspath(__file__)),
-                'split',
-                'swegym_verified_instances.json',
-            ),
-            'r',
-        ) as f:
-            swegym_verified_instances = json.load(f)
-            swe_bench_tests = swe_bench_tests[
-                swe_bench_tests['instance_id'].isin(swegym_verified_instances)
-            ]
-        logger.info(
-            f'{len(swe_bench_tests)} tasks left after filtering for SWE-Gym verified instances'
-        )
+    # if DATASET_TYPE == 'SWE-Gym':
+    #     with open(
+    #         os.path.join(
+    #             os.path.dirname(os.path.abspath(__file__)),
+    #             'split',
+    #             'swegym_verified_instances.json',
+    #         ),
+    #         'r',
+    #     ) as f:
+    #         swegym_verified_instances = json.load(f)
+    #         swe_bench_tests = swe_bench_tests[
+    #             swe_bench_tests['instance_id'].isin(swegym_verified_instances)
+    #         ]
+    #     logger.info(
+    #         f'{len(swe_bench_tests)} tasks left after filtering for SWE-Gym verified instances'
+    #     )
 
     llm_config = None
     if args.llm_config:
