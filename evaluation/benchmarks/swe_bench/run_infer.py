@@ -777,15 +777,20 @@ if __name__ == '__main__':
     args, _ = parser.parse_known_args()
 
     # Check if instance data is provided directly
-    if args.instance_dict_path:
-        logger.info(f'Loading instance from --instance-dict-path: {args.instance_dict_path}')
-        with open(args.instance_dict_path, 'r') as f:
-            instance_data = json.load(f)
+    if args.instance_dict_path and args.selected_id:
+        logger.info(f"Loading instance from --instance-dict-path: {args.instance_dict_path}")
+        with open(args.instance_dict_path, "r") as f:
+            instance_data = [json.loads(line) for line in f]
+            instance_data = [
+                instance_dict
+                for instance_dict in instance_data
+                if instance_dict["instance_id"] == args.selected_id
+            ][0]
 
         # delete the instance_dict_path to avoid information leakage
         os.remove(args.instance_dict_path)
         swe_bench_tests = pd.DataFrame([instance_data])
-        logger.info(f'Loaded instance from --instance-dict-path: {instance_data.get("instance_id", "unknown")}')
+        logger.info(f"Loaded instance from --instance-dict-path: {instance_data.get('instance_id', 'unknown')}")
         set_dataset_type(args.dataset)
     else:
         # NOTE: It is preferable to load datasets from huggingface datasets and perform post-processing
