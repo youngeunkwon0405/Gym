@@ -768,19 +768,24 @@ if __name__ == '__main__':
         help='Single instance ID to evaluate (e.g., "django__django-12345")',
     )
     parser.add_argument(
-        '--instance-dict',
+        '--instance-dict-path',
         type=str,
         default=None,
-        help='JSON string containing instance data to use instead of loading from HuggingFace (e.g., \'{"instance_id": "...", "repo": "...", ...}\')',
+        help='Path to a JSON file containing instance data to use instead of loading from HuggingFace (e.g., \'{"instance_id": "...", "repo": "...", ...}\')',
     )
 
     args, _ = parser.parse_known_args()
 
     # Check if instance data is provided directly
-    if args.instance_dict:
-        instance_data = json.loads(args.instance_dict)
+    if args.instance_dict_path:
+        logger.info(f'Loading instance from --instance-dict-path: {args.instance_dict_path}')
+        with open(args.instance_dict_path, 'r') as f:
+            instance_data = json.load(f)
+
+        # delete the instance_dict_path to avoid information leakage
+        os.remove(args.instance_dict_path)
         swe_bench_tests = pd.DataFrame([instance_data])
-        logger.info(f'Loaded instance from --instance-dict: {instance_data.get("instance_id", "unknown")}')
+        logger.info(f'Loaded instance from --instance-dict-path: {instance_data.get("instance_id", "unknown")}')
         set_dataset_type(args.dataset)
     else:
         # NOTE: It is preferable to load datasets from huggingface datasets and perform post-processing
