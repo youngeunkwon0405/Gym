@@ -132,7 +132,7 @@ function run_eval() {
     COMMAND="$COMMAND --selected-id \"$SELECTED_ID\""
   fi
 
-  if [ -n "$INSTANCE_DICT" ]; then
+  if [ -n "$INSTANCE_DICT_PATH" ]; then
     echo "INSTANCE_DICT: Using provided instance dictionary"
     COMMAND="$COMMAND --instance-dict-path $INSTANCE_DICT_PATH"
   fi
