@@ -23,6 +23,7 @@ from openhands.agenthub.codeact_agent.tools.security_utils import RISK_LEVELS
 from openhands.core.exceptions import (
     FunctionCallNotExistsError,
     FunctionCallValidationError,
+    LLMContextWindowExceedError,
 )
 from openhands.core.logger import openhands_logger as logger
 from openhands.events.action import (
@@ -77,6 +78,16 @@ def response_to_actions(
     assert len(response.choices) == 1, 'Only one choice is supported for now'
     choice = response.choices[0]
     assistant_msg = choice.message
+
+    # Check if both content and tool_calls are None - this indicates context length has been hit
+    has_content = assistant_msg.content is not None
+    has_tool_calls = hasattr(assistant_msg, 'tool_calls') and assistant_msg.tool_calls
+
+    if not has_content and not has_tool_calls:
+        raise LLMContextWindowExceedError(
+            'LLM returned empty response with no content and no tool calls. This indicates the context length limit has been exceeded.'
+        )
+
     if hasattr(assistant_msg, 'tool_calls') and assistant_msg.tool_calls:
         # Check if there's assistant_msg.content. If so, add it to the thought
         thought = ''
