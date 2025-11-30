@@ -80,7 +80,9 @@ def set_dataset_type(dataset_name: str) -> str:
     global DATASET_TYPE
     name_lower = dataset_name.lower()
 
-    if 'swe-gym' in name_lower:
+    if 'nv-internal-1' in name_lower:
+        DATASET_TYPE = 'nv-internal-1'
+    elif 'swe-gym' in name_lower:
         DATASET_TYPE = 'SWE-Gym'
     elif 'swe-bench-live' in name_lower:
         DATASET_TYPE = 'SWE-bench-Live'
@@ -336,6 +338,8 @@ def initialize_runtime(
             entry_script_path = 'instance_swe_entry_live.sh'
         elif DATASET_TYPE == 'SWE-rebench':
             entry_script_path = 'instance_swe_entry_rebench.sh'
+        elif DATASET_TYPE == 'nv-internal-1':
+            entry_script_path = 'instance_swe_entry_nv_internal.sh'
         else:
             entry_script_path = 'instance_swe_entry.sh'
         runtime.copy_to(
@@ -419,9 +423,9 @@ def initialize_runtime(
             obs = runtime.run_action(action)
             logger.info(obs, extra={'msg_type': 'OBSERVATION'})
 
-    if DATASET_TYPE != 'Multimodal' and DATASET_TYPE != 'SWE-bench-Live':
+    if DATASET_TYPE not in ('Multimodal', 'SWE-bench-Live', 'nv-internal-1'):
         # Only for non-multimodal datasets, we need to activate the testbed environment for Python
-        # SWE-Bench multimodal datasets and SWE-bench-Live are not using the testbed environment
+        # SWE-Bench multimodal datasets, SWE-bench-Live, and nv-internal-1 are not using the testbed environment
         action = CmdRunAction(command='which python')
         action.set_hard_timeout(600)
         logger.info(action, extra={'msg_type': 'ACTION'})
@@ -775,6 +779,14 @@ if __name__ == '__main__':
     )
 
     args, _ = parser.parse_known_args()
+
+    # Validate nv-internal-1 requires instance_dict_path
+    if 'nv-internal-1' in args.dataset.lower():
+        if not args.instance_dict_path or not args.selected_id:
+            raise ValueError(
+                'nv-internal-1 dataset requires both --instance-dict-path and --selected-id arguments. '
+                'This dataset does not support HuggingFace dataset loading.'
+            )
 
     # Check if instance data is provided directly
     if args.instance_dict_path and args.selected_id:
