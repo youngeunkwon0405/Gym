@@ -84,6 +84,8 @@ def set_dataset_type(dataset_name: str) -> str:
         DATASET_TYPE = 'nv-internal-1'
     elif 'swe-gym' in name_lower:
         DATASET_TYPE = 'SWE-Gym'
+    elif 'r2e-gym' in name_lower:
+        DATASET_TYPE = 'R2E-Gym'
     elif 'swe-bench-live' in name_lower:
         DATASET_TYPE = 'SWE-bench-Live'
     elif 'swe-rebench' in name_lower:
@@ -191,6 +193,8 @@ def get_instance_docker_image(
             docker_image_prefix = 'docker.io/swebench/'
         elif DATASET_TYPE == 'SWE-rebench':
             docker_image_prefix = 'docker.io/swerebench/'
+        elif DATASET_TYPE in ['R2E-Gym', 'nv-internal-1']:
+            docker_image_prefix = 'UNAVAILABLE'
         repo, name = instance_id.split('__')
         image_name = f'{docker_image_prefix.rstrip("/")}/sweb.eval.x86_64.{repo}_1776_{name}:latest'.lower()
         logger.debug(f'Using official SWE-Bench image: {image_name}')
@@ -340,6 +344,8 @@ def initialize_runtime(
             entry_script_path = 'instance_swe_entry_rebench.sh'
         elif DATASET_TYPE == 'nv-internal-1':
             entry_script_path = 'instance_swe_entry_nv_internal.sh'
+        elif DATASET_TYPE == 'R2E-Gym':
+            entry_script_path = 'instance_swe_entry_r2e.sh'
         else:
             entry_script_path = 'instance_swe_entry.sh'
         runtime.copy_to(
@@ -819,6 +825,15 @@ if __name__ == '__main__':
     logger.info(
         f'Loaded dataset {args.dataset} with split {args.split}: {len(swe_bench_tests)} tasks'
     )
+
+    # Insert dummy columns that OpenHands expects to be present
+    if "PASS_TO_PASS" not in swe_bench_tests:
+        swe_bench_tests["PASS_TO_PASS"] = "[]"
+    if "FAIL_TO_PASS" not in swe_bench_tests:
+        swe_bench_tests["FAIL_TO_PASS"] = "[]"
+    if "version" not in swe_bench_tests:
+        swe_bench_tests["version"] = "1.0"
+
     # if DATASET_TYPE == 'SWE-Gym':
     #     with open(
     #         os.path.join(
