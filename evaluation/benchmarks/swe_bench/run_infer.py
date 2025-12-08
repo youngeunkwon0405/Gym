@@ -3,7 +3,7 @@ import copy
 import json
 import os
 import tempfile
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 import pandas as pd
 import toml
@@ -96,7 +96,7 @@ def set_dataset_type(dataset_name: str) -> str:
         DATASET_TYPE = 'SWE-bench'
 
     logger.info(f'Dataset type set to: {DATASET_TYPE}')
-
+    os.environ['SWE_BENCH_DATASET_TYPE'] = DATASET_TYPE
 
 AGENT_CLS_TO_FAKE_USER_RESPONSE_FN = {
     'CodeActAgent': codeact_user_response,
@@ -112,6 +112,7 @@ def _get_swebench_workspace_dir_name(instance: pd.Series) -> str:
 
 def get_instruction(instance: pd.Series, metadata: EvalMetadata) -> MessageAction:
     workspace_dir_name = _get_swebench_workspace_dir_name(instance)
+    workspace_path = _get_workspace_path(instance, workspace_dir_name)
     mode = metadata.details['mode']
     llm_model = metadata.llm_config.model
 
@@ -142,7 +143,7 @@ def get_instruction(instance: pd.Series, metadata: EvalMetadata) -> MessageActio
     # Prepare context for rendering
     context = {
         'instance': instance,
-        'workspace_dir_name': workspace_dir_name,
+        'workspace_path': workspace_path,
         'metadata': metadata,  # Pass metadata if needed in templates
     }
 
@@ -287,6 +288,7 @@ def initialize_runtime(
     logger.info('BEGIN Runtime Initialization Fn')
     logger.info('-' * 30)
     workspace_dir_name = _get_swebench_workspace_dir_name(instance)
+    workspace_path = _get_workspace_path(instance, workspace_dir_name)
     obs: CmdOutputObservation
 
     # Set instance id and git configuration
@@ -369,24 +371,27 @@ def initialize_runtime(
         logger.error(f'Failed to source ~/.bashrc: {str(obs)}')
     assert_and_raise(obs.exit_code == 0, f'Failed to source ~/.bashrc: {str(obs)}')
 
-    action = CmdRunAction(command=f'source /swe_util/{entry_script_path}')
-    action.set_hard_timeout(600)
-    logger.info(action, extra={'msg_type': 'ACTION'})
-    obs = runtime.run_action(action)
-    logger.info(obs, extra={'msg_type': 'OBSERVATION'})
-    assert_and_raise(
-        obs.exit_code == 0,
-        f'Failed to source /swe_util/{entry_script_path}: {str(obs)}',
-    )
 
-    action = CmdRunAction(command=f'cd /workspace/{workspace_dir_name}')
+    # nv-internal-1 instances operate directly out of /app instead of /workspace.
+    if DATASET_TYPE != 'nv-internal-1':
+        action = CmdRunAction(command=f'source /swe_util/{entry_script_path}')
+        action.set_hard_timeout(600)
+        logger.info(action, extra={'msg_type': 'ACTION'})
+        obs = runtime.run_action(action)
+        logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+        assert_and_raise(
+            obs.exit_code == 0,
+            f'Failed to source /swe_util/{entry_script_path}: {str(obs)}',
+        )
+
+    action = CmdRunAction(command=f'cd {workspace_path}')
     action.set_hard_timeout(600)
     logger.info(action, extra={'msg_type': 'ACTION'})
     obs = runtime.run_action(action)
     logger.info(obs, extra={'msg_type': 'OBSERVATION'})
     assert_and_raise(
         obs.exit_code == 0,
-        f'Failed to cd to /workspace/{workspace_dir_name}: {str(obs)}',
+        f'Failed to cd to {workspace_path}: {str(obs)}',
     )
 
     action = CmdRunAction(command='git reset --hard')
@@ -446,6 +451,17 @@ def initialize_runtime(
     logger.info('END Runtime Initialization Fn')
     logger.info('-' * 30)
 
+def _get_workspace_path(
+    instance: pd.Series, workspace_dir_name: Optional[str] = None
+) -> str:
+    """Return the absolute workspace path expected by runtime commands."""
+    if workspace_dir_name is None:
+        workspace_dir_name = _get_swebench_workspace_dir_name(instance)
+
+    if DATASET_TYPE == "nv-internal-1":
+        # nv-internal-1 instances operate directly out of /app instead of /workspace.
+        return "/app"
+    return f"/workspace/{workspace_dir_name}"
 
 def complete_runtime(
     runtime: Runtime,
@@ -462,8 +478,9 @@ def complete_runtime(
     logger.info('-' * 30)
     obs: CmdOutputObservation
     workspace_dir_name = _get_swebench_workspace_dir_name(instance)
+    workspace_path = _get_workspace_path(instance, workspace_dir_name)
 
-    action = CmdRunAction(command=f'cd /workspace/{workspace_dir_name}')
+    action = CmdRunAction(command=f'cd {workspace_path}')
     action.set_hard_timeout(600)
     logger.info(action, extra={'msg_type': 'ACTION'})
     obs = runtime.run_action(action)
@@ -478,7 +495,7 @@ def complete_runtime(
         logger.info(obs, extra={'msg_type': 'OBSERVATION'})
 
         # Then run the command again
-        action = CmdRunAction(command=f'cd /workspace/{workspace_dir_name}')
+        action = CmdRunAction(command=f'cd {workspace_path}')
         action.set_hard_timeout(600)
         logger.info(action, extra={'msg_type': 'ACTION'})
         obs = runtime.run_action(action)
@@ -493,7 +510,7 @@ def complete_runtime(
         logger.info(obs, extra={'msg_type': 'OBSERVATION'})
 
         # Then run the command again
-        action = CmdRunAction(command=f'cd /workspace/{workspace_dir_name}')
+        action = CmdRunAction(command=f'cd {workspace_path}')
         action.set_hard_timeout(600)
         logger.info(action, extra={'msg_type': 'ACTION'})
         obs = runtime.run_action(action)
@@ -501,7 +518,7 @@ def complete_runtime(
 
     assert_and_raise(
         isinstance(obs, CmdOutputObservation) and obs.exit_code == 0,
-        f'Failed to cd to /workspace/{workspace_dir_name}: {str(obs)}',
+        f'Failed to cd to {workspace_path}: {str(obs)}',
     )
 
     action = CmdRunAction(command='git config --global core.pager ""')

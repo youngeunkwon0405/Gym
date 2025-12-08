@@ -22,20 +22,3 @@ fi
 WORKSPACE_NAME=$(echo "$item" | jq -r '(.repo | tostring) + "__" + (.version | tostring) | gsub("/"; "__")')
 
 echo "WORKSPACE_NAME: $WORKSPACE_NAME"
-
-# Clear the workspace
-if [ -d /workspace ]; then
-    rm -rf /workspace/*
-else
-    mkdir /workspace
-fi
-# Copy repo to workspace from /app (nv-internal-1 uses /app as source directory)
-if [ -d /workspace/$WORKSPACE_NAME ]; then
-    rm -rf /workspace/$WORKSPACE_NAME
-fi
-mkdir -p /workspace
-cp -r /app /workspace/$WORKSPACE_NAME
-
-# Note: nv-internal-1 supports Python, JavaScript, and TypeScript repos
-# Environment activation is handled differently per language/project
-# No conda activation is performed here as the container should already have the appropriate environment
