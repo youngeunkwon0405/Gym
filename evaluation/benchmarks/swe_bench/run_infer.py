@@ -383,6 +383,22 @@ def initialize_runtime(
             obs.exit_code == 0,
             f'Failed to source /swe_util/{entry_script_path}: {str(obs)}',
         )
+    elif instance.get("repo_language", "").lower() == "python":
+        # change python to the base python in the container and not the OpenHands venv
+        action = CmdRunAction(
+            command=(
+                "deactivate >/dev/null 2>&1 || true; unset VIRTUAL_ENV; "
+                "export PATH=/usr/bin:/bin:/usr/local/bin:$PATH; which python"
+            )
+        )
+        action.set_hard_timeout(600)
+        logger.info(action, extra={"msg_type": "ACTION"})
+        obs = runtime.run_action(action)
+        logger.info(obs, extra={"msg_type": "OBSERVATION"})
+        assert_and_raise(
+            obs.exit_code == 0,
+            f"Failed to deactivate and which python: {str(obs)}",
+        )
 
     action = CmdRunAction(command=f'cd {workspace_path}')
     action.set_hard_timeout(600)
