@@ -14,8 +14,9 @@ SPLIT=$8
 EVAL_OUTPUT_DIR=${9}
 SELECTED_ID=${10}
 INSTANCE_DICT_PATH=${11}
-N_RUNS=${12}
-MODE=${13}
+CONFIG_FILE=${12}
+N_RUNS=${13}
+MODE=${14}
 
 if [ -z "$NUM_WORKERS" ]; then
   NUM_WORKERS=1
@@ -58,6 +59,11 @@ if [ -n "$EVAL_CONDENSER" ]; then
   echo "Using Condenser Config: $EVAL_CONDENSER"
 else
   echo "No Condenser Config provided via EVAL_CONDENSER, use default (NoOpCondenser)."
+fi
+
+if [ -z "$CONFIG_FILE" ]; then
+  echo "CONFIG_FILE not specified, use default config.toml"
+  CONFIG_FILE="config.toml"
 fi
 
 export RUN_WITH_BROWSING=$RUN_WITH_BROWSING
@@ -135,6 +141,11 @@ function run_eval() {
   if [ -n "$INSTANCE_DICT_PATH" ]; then
     echo "INSTANCE_DICT: Using provided instance dictionary"
     COMMAND="$COMMAND --instance-dict-path $INSTANCE_DICT_PATH"
+  fi
+
+  if [ -n "$CONFIG_FILE" ]; then
+    echo "CONFIG_FILE: $CONFIG_FILE"
+    COMMAND="$COMMAND --config-file $CONFIG_FILE"
   fi
 
   # Run the command
