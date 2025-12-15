@@ -641,7 +641,7 @@ def is_fatal_evaluation_error(error: str | None) -> bool:
     FATAL_EXCEPTIONS = [
         AgentRuntimeError,
         AgentRuntimeBuildError,
-        AgentRuntimeTimeoutError,
+        # AgentRuntimeTimeoutError is NOT fatal - we want the agent to see it and try a different approach
         AgentRuntimeUnavailableError,
         AgentRuntimeNotReadyError,
         AgentRuntimeDisconnectedError,
@@ -661,7 +661,7 @@ def is_fatal_runtime_error(error: str | None) -> bool:
         return False
 
     FATAL_RUNTIME_ERRORS = [
-        AgentRuntimeTimeoutError,
+        # AgentRuntimeTimeoutError is NOT fatal - we want the agent to see it and try a different approach
         AgentRuntimeUnavailableError,
         AgentRuntimeDisconnectedError,
         AgentRuntimeNotFoundError,

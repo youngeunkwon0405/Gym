@@ -74,6 +74,8 @@ BenchMode = Literal['swe', 'swt', 'swt-ci']
 # Global variable to track dataset type
 DATASET_TYPE = 'SWE-bench'
 
+MAX_RETRIES = 1
+
 
 def set_dataset_type(dataset_name: str) -> str:
     """Set dataset type based on dataset name."""
@@ -961,7 +963,7 @@ if __name__ == '__main__':
             timeout_seconds=8
             * 60
             * 60,  # 8 hour PER instance should be more than enough
-            max_retries=5,
+            max_retries=MAX_RETRIES,
         )
     else:
         critic = AgentFinishedCritic()
@@ -1010,7 +1012,7 @@ if __name__ == '__main__':
                 timeout_seconds=8
                 * 60
                 * 60,  # 8 hour PER instance should be more than enough
-                max_retries=5,
+                max_retries=MAX_RETRIES,
             )
 
             # When eval is done, we update eval_ids to the instances that failed the current attempt

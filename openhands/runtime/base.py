@@ -20,6 +20,7 @@ from openhands.core.config import OpenHandsConfig, SandboxConfig
 from openhands.core.config.mcp_config import MCPConfig, MCPStdioServerConfig
 from openhands.core.exceptions import (
     AgentRuntimeDisconnectedError,
+    AgentRuntimeTimeoutError,
 )
 from openhands.core.logger import openhands_logger as logger
 from openhands.events import EventSource, EventStream, EventStreamSubscriber
@@ -382,6 +383,15 @@ class Runtime(FileEditRuntimeMixin):
             # Handle PermissionError specially - convert to ErrorObservation
             # so the agent can receive feedback and continue execution
             observation = ErrorObservation(content=str(e))
+        except AgentRuntimeTimeoutError as e:
+            # Handle timeout errors by converting to ErrorObservation
+            # so the agent can receive feedback and try a different approach
+            observation = ErrorObservation(
+                content=f'{type(e).__name__}: {str(e)}\n'
+                f'The previous action timed out (timeout: {event.timeout}s)'
+                'Consider trying a different approach, breaking the task into smaller steps, '
+                'or optimizing your command to complete within the time limit.'
+            )
         except (httpx.NetworkError, AgentRuntimeDisconnectedError) as e:
             runtime_status = RuntimeStatus.ERROR_RUNTIME_DISCONNECTED
             error_message = f'{type(e).__name__}: {str(e)}'
