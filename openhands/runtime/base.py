@@ -386,9 +386,21 @@ class Runtime(FileEditRuntimeMixin):
         except AgentRuntimeTimeoutError as e:
             # Handle timeout errors by converting to ErrorObservation
             # so the agent can receive feedback and try a different approach
+
+            # Try to kill any running process in the background
+            try:
+                self.log('warning', f'Action timed out after {event.timeout}s, attempting to kill running process...')
+                # Send Ctrl-C to interrupt the process
+                interrupt_action = CmdRunAction(command='C-c', is_input=True)
+                interrupt_action.set_hard_timeout(10, blocking=False)
+                interrupt_obs = self.run_action(interrupt_action)
+                self.log('debug', f'Interrupt signal sent: {interrupt_obs}')
+            except Exception as interrupt_error:
+                self.log('debug', f'Could not send interrupt signal: {interrupt_error}')
+
             observation = ErrorObservation(
                 content=f'{type(e).__name__}: {str(e)}\n'
-                f'The previous action timed out (timeout: {event.timeout}s)'
+                f'The previous action timed out (timeout: {event.timeout}s) and has been interrupted.\n'
                 'Consider trying a different approach, breaking the task into smaller steps, '
                 'or optimizing your command to complete within the time limit.'
             )
