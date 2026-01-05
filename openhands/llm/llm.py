@@ -283,6 +283,26 @@ class LLM(RetryMixin, DebugMixin):
             else:
                 messages = cast(list[dict[str, Any]], messages_list)
 
+            # Remove prompt_token_ids, generation_token_ids, and generation_log_probs from all messages except the last
+            # Store removed fields so we can restore them after the completion call
+            fields_to_remove = ["prompt_token_ids", "generation_token_ids", "generation_log_probs"]
+            removed_fields: dict[int, dict[str, Any]] = {}
+
+            last_occurrence_idx = -1
+            for i, message in enumerate(reversed(messages)):
+                if all(field in message for field in fields_to_remove):
+                    last_occurrence_idx = len(messages) - i - 1
+                    break
+
+            for i, message in enumerate[dict](messages):
+                if i == last_occurrence_idx:
+                    continue
+                removed_fields[i] = {}
+                for field in fields_to_remove:
+                    if field in message:
+                        removed_fields[i][field] = message[field]
+                        del message[field]
+
             kwargs['messages'] = messages
 
             # handle conversion of to non-function calling messages if needed
@@ -356,6 +376,12 @@ class LLM(RetryMixin, DebugMixin):
                     category=DeprecationWarning,
                 )
                 resp: ModelResponse = self._completion_unwrapped(*args, **kwargs)
+
+                # Restore the removed token fields to messages
+                for i, fields in removed_fields.items():
+                    for field, value in fields.items():
+                        messages[i][field] = value
+
                 if not self.response_headers:
                     self.response_headers = resp._response_headers
 
