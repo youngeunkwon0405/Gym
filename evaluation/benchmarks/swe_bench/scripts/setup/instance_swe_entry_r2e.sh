@@ -30,18 +30,19 @@ WORKSPACE_NAME=$(echo "$item" | jq -r '(.repo | tostring) + "__" + (.version | t
 
 echo "WORKSPACE_NAME: $WORKSPACE_NAME"
 
-# Clear the workspace
-if [ -d /workspace ]; then
-    rm -rf /workspace/*
-else
-    mkdir /workspace
-fi
-# Copy repo to workspace
+mkdir -p /workspace
+
+# Remove existing workspace if present
 if [ -d /workspace/$WORKSPACE_NAME ]; then
     rm -rf /workspace/$WORKSPACE_NAME
 fi
-mkdir -p /workspace
-cp -r /testbed /workspace/$WORKSPACE_NAME
+
+# Use cp with hard links (-al) for near-instant copy
+# Falls back to regular copy if hard links fail
+if ! cp -al /testbed /workspace/$WORKSPACE_NAME 2>/dev/null; then
+    echo "Hard link copy failed, falling back to regular copy..."
+    cp -r /testbed /workspace/$WORKSPACE_NAME
+fi
 
 # Activate instance-specific environment
 source /testbed/.venv/bin/activate

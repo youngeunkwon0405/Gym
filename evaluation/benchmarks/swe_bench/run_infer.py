@@ -4,7 +4,7 @@ import json
 import os
 import tempfile
 from typing import Any, Literal, Optional
-
+import time
 import pandas as pd
 import toml
 from datasets import load_dataset
@@ -68,6 +68,7 @@ from openhands.utils.shutdown_listener import sleep_if_should_continue
 
 USE_HINT_TEXT = os.environ.get('USE_HINT_TEXT', 'false').lower() == 'true'
 RUN_WITH_BROWSING = os.environ.get('RUN_WITH_BROWSING', 'false').lower() == 'true'
+ENABLE_BROWSER_FOR_SWEBENCH = os.environ.get('ENABLE_BROWSER_FOR_SWEBENCH', 'false').lower() == 'true'
 ENABLE_LLM_EDITOR = os.environ.get('ENABLE_LLM_EDITOR', 'false').lower() == 'true'
 BenchMode = Literal['swe', 'swt', 'swt-ci']
 
@@ -242,7 +243,7 @@ def get_config(
 
     config = get_openhands_config_for_eval(
         metadata=metadata,
-        enable_browser=RUN_WITH_BROWSING,
+        enable_browser=ENABLE_BROWSER_FOR_SWEBENCH,
         runtime=os.environ.get('RUNTIME', 'docker'),
         sandbox_config=sandbox_config,
     )
@@ -262,7 +263,7 @@ def get_config(
 
     agent_config = AgentConfig(
         enable_jupyter=False,
-        enable_browsing=RUN_WITH_BROWSING,
+        enable_browsing=ENABLE_BROWSER_FOR_SWEBENCH,
         enable_llm_editor=ENABLE_LLM_EDITOR,
         enable_mcp=False,
         condenser=metadata.condenser_config,
@@ -293,39 +294,29 @@ def initialize_runtime(
     workspace_path = _get_workspace_path(instance, workspace_dir_name)
     obs: CmdOutputObservation
 
-    # Set instance id and git configuration
-    action = CmdRunAction(
-        command=f"""echo 'export SWE_INSTANCE_ID={instance['instance_id']}' >> ~/.bashrc && echo 'export PIP_CACHE_DIR=~/.cache/pip' >> ~/.bashrc && echo "alias git='git --no-pager'" >> ~/.bashrc && git config --global core.pager "" && git config --global diff.binary false"""
-    )
+    initial_setup_cmd = f"""
+echo 'export SWE_INSTANCE_ID={instance['instance_id']}' >> ~/.bashrc && \
+echo 'export PIP_CACHE_DIR=~/.cache/pip' >> ~/.bashrc && \
+echo "alias git='git --no-pager'" >> ~/.bashrc && \
+git config --global core.pager "" && \
+git config --global diff.binary false && \
+export USER=$(whoami) && \
+echo "USER=$USER" && \
+mkdir -p /swe_util/eval_data/instances && \
+source ~/.bashrc
+"""
+    action = CmdRunAction(command=initial_setup_cmd.strip())
     action.set_hard_timeout(600)
     logger.info(action, extra={'msg_type': 'ACTION'})
     obs = runtime.run_action(action)
     logger.info(obs, extra={'msg_type': 'OBSERVATION'})
     assert_and_raise(
         obs.exit_code == 0,
-        f'Failed to export SWE_INSTANCE_ID and configure git: {str(obs)}',
+        f'Failed to run initial setup: {str(obs)}',
     )
-
-    action = CmdRunAction(command="""export USER=$(whoami); echo USER=${USER} """)
-    action.set_hard_timeout(600)
-    logger.info(action, extra={'msg_type': 'ACTION'})
-    obs = runtime.run_action(action)
-    logger.info(obs, extra={'msg_type': 'OBSERVATION'})
-    assert_and_raise(obs.exit_code == 0, f'Failed to export USER: {str(obs)}')
 
     # inject the init script
     script_dir = os.path.dirname(__file__)
-
-    # inject the instance info
-    action = CmdRunAction(command='mkdir -p /swe_util/eval_data/instances')
-    action.set_hard_timeout(600)
-    logger.info(action, extra={'msg_type': 'ACTION'})
-    obs = runtime.run_action(action)
-    logger.info(obs, extra={'msg_type': 'OBSERVATION'})
-    assert_and_raise(
-        obs.exit_code == 0,
-        f'Failed to create /swe_util/eval_data/instances: {str(obs)}',
-    )
 
     swe_instance_json_name = 'swe-bench-instance.json'
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -356,23 +347,6 @@ def initialize_runtime(
             str(os.path.join(script_dir, f'scripts/setup/{entry_script_path}')),
             '/swe_util/',
         )
-
-    action = CmdRunAction(command='cat ~/.bashrc')
-    action.set_hard_timeout(600)
-    logger.info(action, extra={'msg_type': 'ACTION'})
-    obs = runtime.run_action(action)
-    logger.info(obs, extra={'msg_type': 'OBSERVATION'})
-    assert_and_raise(obs.exit_code == 0, f'Failed to cat ~/.bashrc: {str(obs)}')
-
-    action = CmdRunAction(command='source ~/.bashrc')
-    action.set_hard_timeout(600)
-    logger.info(action, extra={'msg_type': 'ACTION'})
-    obs = runtime.run_action(action)
-    logger.info(obs, extra={'msg_type': 'OBSERVATION'})
-    if isinstance(obs, ErrorObservation):
-        logger.error(f'Failed to source ~/.bashrc: {str(obs)}')
-    assert_and_raise(obs.exit_code == 0, f'Failed to source ~/.bashrc: {str(obs)}')
-
 
     # nv-internal-1 instances operate directly out of /app instead of /workspace.
     if DATASET_TYPE != 'nv-internal-1':
@@ -681,16 +655,24 @@ def process_instance(
     metadata.details['remote_runtime_resource_factor'] = (
         config.sandbox.remote_runtime_resource_factor
     )
-
+    start_time = time.perf_counter()
     runtime = create_runtime(config)
+    end_time = time.perf_counter()
+    print(f"create runtime: {end_time - start_time} seconds", flush = True)
+    start_time = time.perf_counter()
     call_async_from_sync(runtime.connect)
+    end_time = time.perf_counter()
+    print(f"connect to runtime: {end_time - start_time} seconds", flush = True)
 
     try:
+        start_time = time.perf_counter()
         initialize_runtime(runtime, instance, metadata)
-
+        end_time = time.perf_counter()
+        print(f"init runtime: {end_time - start_time} seconds", flush = True)
         message_action = get_instruction(instance, metadata)
 
         # Here's how you can run the agent (similar to the `main` function) and get the final task state
+        start_time = time.perf_counter()
         state: State | None = asyncio.run(
             run_controller(
                 config=config,
@@ -701,6 +683,8 @@ def process_instance(
                 ],
             )
         )
+        end_time = time.perf_counter()
+        print(f"run controller: {end_time - start_time} seconds", flush = True)
 
         # if fatal error, throw EvalError to trigger re-run
         if is_fatal_evaluation_error(state.last_error):
