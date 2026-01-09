@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
-source "evaluation/utils/version_control.sh"
+# Remove this to allow running without version control
+# source "evaluation/utils/version_control.sh"
 
 MODEL_CONFIG=$1
 COMMIT_HASH=$2
