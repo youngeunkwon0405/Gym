@@ -75,7 +75,7 @@ BenchMode = Literal['swe', 'swt', 'swt-ci']
 # Global variable to track dataset type
 DATASET_TYPE = 'SWE-bench'
 
-MAX_RETRIES = 1
+MAX_RETRIES = 3
 
 
 def set_dataset_type(dataset_name: str) -> str:
