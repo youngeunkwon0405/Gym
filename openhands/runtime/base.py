@@ -378,7 +378,11 @@ class Runtime(FileEditRuntimeMixin):
             if isinstance(event, MCPAction):
                 observation: Observation = await self.call_tool_mcp(event)
             else:
-                event.set_hard_timeout(min(event.timeout, 600), blocking=True)
+                if hasattr(event, 'blocking'):
+                    blocking_val = event.blocking
+                else:
+                    blocking_val = False
+                event.set_hard_timeout(min(event.timeout,600), blocking=blocking_val)
                 observation = await call_sync_from_async(self.run_action, event)
         except PermissionError as e:
             # Handle PermissionError specially - convert to ErrorObservation
