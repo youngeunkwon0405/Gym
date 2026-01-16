@@ -485,6 +485,11 @@ def complete_runtime(
         action = CmdRunAction(command='C-c')
         obs = runtime.run_action(action)
         logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+        if obs.exit_code == -1:
+            logger.info('C-c without is_input failed, retrying with is_input=True...')
+            action = CmdRunAction(command='C-c', is_input=True)
+            obs = runtime.run_action(action)
+            logger.info(obs, extra={'msg_type': 'OBSERVATION'})
 
         # Then run the command again
         action = CmdRunAction(command=f'cd {workspace_path}')
@@ -500,6 +505,11 @@ def complete_runtime(
         action = CmdRunAction(command='C-z')
         obs = runtime.run_action(action)
         logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+        if obs.exit_code == -1:
+            logger.info('C-z without is_input failed, retrying with is_input=True...')
+            action = CmdRunAction(command='C-z', is_input=True)
+            obs = runtime.run_action(action)
+            logger.info(obs, extra={'msg_type': 'OBSERVATION'})
 
         # Then run the command again
         action = CmdRunAction(command=f'cd {workspace_path}')
