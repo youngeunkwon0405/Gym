@@ -8,6 +8,7 @@ import shlex
 import shutil
 import string
 import tempfile
+import time
 from abc import abstractmethod
 from pathlib import Path
 from types import MappingProxyType
@@ -373,6 +374,9 @@ class Runtime(FileEditRuntimeMixin):
             # We don't block the command if this is a default timeout action
             event.set_hard_timeout(self.config.sandbox.timeout, blocking=False)
         assert event.timeout is not None
+
+        action_start_time = time.perf_counter()
+
         try:
             await self._export_latest_git_provider_tokens(event)
             if isinstance(event, MCPAction):
@@ -384,10 +388,13 @@ class Runtime(FileEditRuntimeMixin):
                     blocking_val = False
                 event.set_hard_timeout(min(event.timeout,600), blocking=blocking_val)
                 observation = await call_sync_from_async(self.run_action, event)
+
+            observation._execution_latency = time.perf_counter() - action_start_time
         except PermissionError as e:
             # Handle PermissionError specially - convert to ErrorObservation
             # so the agent can receive feedback and continue execution
             observation = ErrorObservation(content=str(e))
+            observation._execution_latency = time.perf_counter() - action_start_time
         except AgentRuntimeTimeoutError as e:
             # Handle timeout errors by converting to ErrorObservation
             # so the agent can receive feedback and try a different approach
@@ -409,6 +416,7 @@ class Runtime(FileEditRuntimeMixin):
                 'Consider trying a different approach, breaking the task into smaller steps, '
                 'or optimizing your command to complete within the time limit.'
             )
+            observation._execution_latency = time.perf_counter() - action_start_time
         except (httpx.NetworkError, AgentRuntimeDisconnectedError) as e:
             runtime_status = RuntimeStatus.ERROR_RUNTIME_DISCONNECTED
             error_message = f'{type(e).__name__}: {str(e)}'

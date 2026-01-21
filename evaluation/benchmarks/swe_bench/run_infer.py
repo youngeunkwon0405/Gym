@@ -55,11 +55,12 @@ from openhands.core.config.utils import get_condenser_config_arg
 from openhands.core.logger import openhands_logger as logger
 from openhands.core.main import create_runtime, run_controller
 from openhands.critic import AgentFinishedCritic
-from openhands.events.action import CmdRunAction, FileReadAction, MessageAction
+from openhands.events.action import  CmdRunAction, FileReadAction, MessageAction
 from openhands.events.observation import (
     CmdOutputObservation,
     ErrorObservation,
     FileReadObservation,
+    Observation,
 )
 from openhands.events.serialization.event import event_from_dict, event_to_dict
 from openhands.runtime.base import Runtime
@@ -733,6 +734,9 @@ def process_instance(
     histories = [event_to_dict(event) for event in state.history]
     metrics = get_metrics(state)
 
+    # Calculate action execution times from history
+    metrics['action_execution_latencies'] = get_action_execution_latencies(state.history)
+
     # Save the output
     instruction = message_action.content
     if message_action.image_urls:
@@ -750,6 +754,25 @@ def process_instance(
         error=state.last_error if state and state.last_error else None,
     )
     return output
+
+
+def get_action_execution_latencies(history: list) -> list[dict]:
+    """Extract execution latencies from observations in the history."""
+    latencies = []
+    for event in history:
+        if isinstance(event, Observation):
+            execution_latency = getattr(event, '_execution_latency', None)
+            if execution_latency is None:
+                execution_latency = getattr(event, 'execution_latency', None)
+            if execution_latency is not None:
+                latencies.append({
+                    'observation_type': type(event).__name__,
+                    'observation_id': str(event.id),
+                    'latency': float(execution_latency),
+                    'message': event.message,
+                    'timestamp': event.timestamp,
+                })
+    return latencies
 
 
 def filter_dataset(
