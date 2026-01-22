@@ -7,6 +7,7 @@ from typing import Any, Callable, cast
 
 import httpx
 import uuid
+import tempfile
 
 
 from openhands.core.config import LLMConfig
@@ -467,8 +468,10 @@ class LLM(RetryMixin, DebugMixin):
                     # Save fncall_messages/response separately
                     _d['fncall_messages'] = original_fncall_messages
                     _d['fncall_response'] = resp
-                with open(log_file, 'w') as f:
+                temp_fd, temp_path = tempfile.mkstemp(dir=os.path.dirname(log_file))
+                with os.fdopen(temp_fd, 'w') as f:
                     f.write(json.dumps(_d))
+                os.replace(temp_path, log_file)
 
             return resp
 
