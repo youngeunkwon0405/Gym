@@ -125,6 +125,11 @@ pg8000 = "^1.31.5"
 asyncpg = "^0.30.0"
 lmnr = "^0.7.20"
 
+# Profiling tools
+gprof2dot = "*"
+pydot = "*"
+yappi = "*"
+
 [tool.poetry.extras]
 third_party_runtimes = [ "e2b-code-interpreter", "modal", "runloop-api-client", "daytona" ]
 
