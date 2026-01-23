@@ -1,13 +1,16 @@
 import os
 import re
+import signal
 import time
 import uuid
 from enum import Enum
-from typing import Any
+from typing import Any, Set
 
 import bashlex
 import libtmux
-
+import psutil
+import threading
+import logging
 from openhands.core.logger import openhands_logger as logger
 from openhands.events.action import CmdRunAction
 from openhands.events.observation import ErrorObservation
@@ -29,6 +32,102 @@ SU_TO_USER = os.getenv("SU_TO_USER", "true").lower() in (
     "y",
     "on",
 )
+
+
+class TmuxMemoryMonitor(threading.Thread):
+    def __init__(self, tmux_server, limit_mb, interval=2.0):
+        super().__init__(daemon=True)
+        self.server = tmux_server
+        self.limit_mb = limit_mb
+        self.limit_bytes = limit_mb * 1024 * 1024
+        self.interval = interval
+        self.running = True
+        print(f"[TmuxMemoryMonitor] initialized with limit: {self.limit_mb} MB", flush=True)
+
+    def _get_server_pid(self):
+        try:
+            pid_str = self.server.cmd("display-message", "-p", "#{pid}").stdout[0]
+            return int(pid_str)
+        except (IndexError, ValueError, Exception):
+            return None
+
+    def get_tree_memory(self, parent_pid):
+        total_mem = 0
+        try:
+            parent = psutil.Process(parent_pid)
+            procs = [parent] + parent.children(recursive=True)
+            for p in procs:
+                try:
+                    total_mem += p.memory_info().rss
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+        except psutil.NoSuchProcess:
+            return 0
+        return total_mem
+
+    def kill_inner_processes(self):
+        try:
+            # Loop through all sessions -> windows -> panes
+            for session in self.server.sessions:
+                for window in session.windows:
+                    for pane in window.panes:
+                        try:
+                            # Get the PID of the process inside the pane
+                            # #{pane_pid} is the PID of the shell or command running in the pane
+                            pane_pid_str = pane.cmd(
+                                "display-message", "-p", "#{pane_pid}"
+                            ).stdout[0]
+                            pane_pid = int(pane_pid_str)
+
+                            # Kill the process tree of that pane
+                            parent = psutil.Process(pane_pid)
+                            children = parent.children(recursive=True)
+
+                            print(
+                                f"[TmuxMemoryMonitor] Killing pane {pane.id} (PID: {pane_pid})",
+                                flush=True,
+                            )
+
+                            for child in children:
+                                child.kill()
+
+                            parent.kill()
+
+                        except (psutil.NoSuchProcess, IndexError, ValueError):
+                            continue
+        except Exception as e:
+            print(f"[TmuxMemoryMonitor] Error killing panes: {e}", flush=True)
+
+    def run(self):
+        print(f"[TmuxMemoryMonitor] started. Limit: {self.limit_mb} MB", flush=True)
+        time.sleep(1)
+
+        server_pid = self._get_server_pid()
+        if not server_pid:
+            print("[TmuxMemoryMonitor] Could not determine Tmux Server PID. Monitor aborting.", flush=True)
+            return
+
+        while self.running:
+            used_bytes = self.get_tree_memory(server_pid)
+            used_mb = used_bytes / (1024 * 1024)
+
+            if used_bytes > self.limit_bytes:
+                print(
+                    f"[TmuxMemoryMonitor] MEMORY LIMIT EXCEEDED: {int(used_mb)}MB > {self.limit_mb}MB",
+                    flush=True,
+                )
+                print(
+                    "[TmuxMemoryMonitor] KILLING PROCESSES INSIDE TMUX (Server stays alive)...",
+                    flush=True,
+                )
+
+                self.kill_inner_processes()
+                time.sleep(10)
+
+            time.sleep(self.interval)
+
+    def stop(self):
+        self.running = False
 
 
 def split_bash_commands(commands: str) -> list[str]:
@@ -199,6 +298,7 @@ class BashSession:
         self.username = username
         self._initialized = False
         self.max_memory_mb = max_memory_mb
+        self.memory_monitor = None
 
     def initialize(self) -> None:
         self.server = libtmux.Server()
@@ -229,6 +329,10 @@ class BashSession:
             x=1000,
             y=1000,
         )
+
+        tmux_memory_limit = int(os.getenv("TMUX_MEMORY_LIMIT", "32768"))
+        self.memory_monitor = TmuxMemoryMonitor(self.server, limit_mb=tmux_memory_limit)
+        self.memory_monitor.start()
 
         # Set history limit to a large number to avoid losing history
         # https://unix.stackexchange.com/questions/43414/unlimited-history-in-tmux
@@ -264,6 +368,8 @@ class BashSession:
 
     def __del__(self) -> None:
         """Ensure the session is closed when the object is destroyed."""
+        if self.memory_monitor:
+            self.memory_monitor.stop()
         self.close()
 
     def _get_pane_content(self) -> str:
@@ -279,6 +385,8 @@ class BashSession:
 
     def close(self) -> None:
         """Clean up the session."""
+        if self.memory_monitor:
+            self.memory_monitor.stop()
         if self._closed:
             return
         self.session.kill()
