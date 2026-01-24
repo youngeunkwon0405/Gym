@@ -700,7 +700,15 @@ def _create_server(
     # Start a thread to read and log server output
     def log_output() -> None:
         # TODO remove
-        return
+        import asyncio
+
+        async def _sleep():
+            while True:
+                if log_thread_exit_event.is_set():
+                    break
+                await asyncio.sleep(5)
+
+        return asyncio.run(_sleep())
 
         if not server_process or not server_process.stdout:
             logger.error('server process or stdout not available for logging.')
