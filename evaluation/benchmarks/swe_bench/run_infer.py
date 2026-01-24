@@ -115,11 +115,18 @@ class Profiler:
         callgrind_dotfile_path = self.base_profile_dir / f"{self.name}.dot"
         callgrind_graph_path = self.base_profile_dir / f"{self.name}.png"
 
+        # TODO remove
+        print("LOG PATH", log_path)
+
         yappi.get_func_stats().save(callgrind_path, type="CALLGRIND")
         gprof2dot_main(argv=f"--format=callgrind --output={callgrind_dotfile_path} -e 1 -n 1 {callgrind_path}".split())
+        print("after yappi and gprof2dot")
 
         (graph,) = graph_from_dot_file(callgrind_dotfile_path)
         graph.write_png(callgrind_graph_path)
+        print("after write png")
+
+        print(list(self.base_profile_dir.iterdir()))
 
         buffer = StringIO()
         yappi.get_func_stats().print_all(
