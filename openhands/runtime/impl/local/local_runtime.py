@@ -699,6 +699,9 @@ def _create_server(
 
     # Start a thread to read and log server output
     def log_output() -> None:
+        # TODO remove
+        return
+
         if not server_process or not server_process.stdout:
             logger.error('server process or stdout not available for logging.')
             return
