@@ -87,8 +87,6 @@ from pathlib import Path
 from typing import Optional
 
 import yappi
-from gprof2dot import main as gprof2dot_main
-from pydot import graph_from_dot_file
 
 
 class Profiler:
@@ -112,16 +110,8 @@ class Profiler:
         self.base_profile_dir.mkdir(parents=True, exist_ok=True)
         log_path = self.base_profile_dir / f"{self.name}.log"
         callgrind_path = self.base_profile_dir / f"{self.name}.callgrind"
-        callgrind_dotfile_path = self.base_profile_dir / f"{self.name}.dot"
-        callgrind_graph_path = self.base_profile_dir / f"{self.name}.png"
 
         yappi.get_func_stats().save(callgrind_path, type="CALLGRIND")
-        gprof2dot_main(argv=f"--format=callgrind --output={callgrind_dotfile_path} -e 1 -n 1 {callgrind_path}".split())
-
-        (graph,) = graph_from_dot_file(callgrind_dotfile_path)
-        graph.write_png(callgrind_graph_path)
-
-        print(list(self.base_profile_dir.iterdir()))
 
         buffer = StringIO()
         yappi.get_func_stats().print_all(
