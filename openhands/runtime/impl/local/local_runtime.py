@@ -699,17 +699,6 @@ def _create_server(
 
     # Start a thread to read and log server output
     def log_output() -> None:
-        # TODO remove
-        import asyncio
-
-        async def _sleep():
-            while True:
-                if server_process.poll() is not None or log_thread_exit_event.is_set():
-                    break
-                await asyncio.sleep(5)
-
-        return asyncio.run(_sleep())
-
         if not server_process or not server_process.stdout:
             logger.error('server process or stdout not available for logging.')
             return
@@ -739,7 +728,8 @@ def _create_server(
             logger.info('server log output thread finished.')
 
     log_thread = threading.Thread(target=log_output, daemon=True)
-    log_thread.start()
+    # TODO maybe revert
+    # log_thread.start()
 
     # Create server info object
     server_info = ActionExecutionServerInfo(
@@ -810,7 +800,8 @@ def _create_warm_server(
                     server_info.process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     server_info.process.kill()
-            server_info.log_thread.join(timeout=5)
+            # TODO maybe revert
+            # server_info.log_thread.join(timeout=5)
             if server_info.temp_workspace:
                 shutil.rmtree(server_info.temp_workspace)
 
