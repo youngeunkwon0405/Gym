@@ -507,8 +507,7 @@ class LocalRuntime(ActionExecutionClient):
             except subprocess.TimeoutExpired:
                 self.server_process.kill()
             self.server_process = None
-            # TODO remove
-            # self._log_thread.join(timeout=5)  # Add timeout to join
+            self._log_thread.join(timeout=5)  # Add timeout to join
 
         # Clean up temp workspace if it exists and we created it
         if self._temp_workspace and not self.attach_to_existing:
@@ -536,8 +535,7 @@ class LocalRuntime(ActionExecutionClient):
                     server_info.process.kill()
 
             # Wait for the log thread to finish
-            # TODO remove
-            # server_info.log_thread.join(timeout=5)
+            server_info.log_thread.join(timeout=5)
 
             # Remove from global dictionary
             del _RUNNING_SERVERS[conversation_id]
@@ -559,8 +557,7 @@ class LocalRuntime(ActionExecutionClient):
                         server_info.process.kill()
 
                 # Wait for the log thread to finish
-                # TODO remove
-                # server_info.log_thread.join(timeout=5)
+                server_info.log_thread.join(timeout=5)
 
                 # Clean up temp workspace
                 if server_info.temp_workspace:
@@ -731,8 +728,7 @@ def _create_server(
             logger.info('server log output thread finished.')
 
     log_thread = threading.Thread(target=log_output, daemon=True)
-    # TODO maybe revert
-    # log_thread.start()
+    log_thread.start()
 
     # Create server info object
     server_info = ActionExecutionServerInfo(
@@ -803,8 +799,7 @@ def _create_warm_server(
                     server_info.process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     server_info.process.kill()
-            # TODO maybe revert
-            # server_info.log_thread.join(timeout=5)
+            server_info.log_thread.join(timeout=5)
             if server_info.temp_workspace:
                 shutil.rmtree(server_info.temp_workspace)
 
