@@ -712,7 +712,9 @@ def _create_server(
                 line = server_process.stdout.readline()
                 if not line:
                     break
-                logger.info(f'server: {line.strip()}')
+
+                # TODO revert
+                # logger.info(f'server: {line.strip()}')
 
             # Capture any remaining output
             if not log_thread_exit_event.is_set():
@@ -720,7 +722,8 @@ def _create_server(
                 for line in server_process.stdout:
                     if log_thread_exit_event.is_set():
                         break
-                    logger.info(f'server (remaining): {line.strip()}')
+                    # TODO revert
+                    # logger.info(f'server (remaining): {line.strip()}')
 
         except Exception as e:
             logger.error(f'Error reading server output: {e}')
