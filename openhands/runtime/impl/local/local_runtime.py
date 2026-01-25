@@ -507,7 +507,8 @@ class LocalRuntime(ActionExecutionClient):
             except subprocess.TimeoutExpired:
                 self.server_process.kill()
             self.server_process = None
-            self._log_thread.join(timeout=5)  # Add timeout to join
+            # TODO remove
+            # self._log_thread.join(timeout=5)  # Add timeout to join
 
         # Clean up temp workspace if it exists and we created it
         if self._temp_workspace and not self.attach_to_existing:
@@ -535,7 +536,8 @@ class LocalRuntime(ActionExecutionClient):
                     server_info.process.kill()
 
             # Wait for the log thread to finish
-            server_info.log_thread.join(timeout=5)
+            # TODO remove
+            # server_info.log_thread.join(timeout=5)
 
             # Remove from global dictionary
             del _RUNNING_SERVERS[conversation_id]
@@ -557,7 +559,8 @@ class LocalRuntime(ActionExecutionClient):
                         server_info.process.kill()
 
                 # Wait for the log thread to finish
-                server_info.log_thread.join(timeout=5)
+                # TODO remove
+                # server_info.log_thread.join(timeout=5)
 
                 # Clean up temp workspace
                 if server_info.temp_workspace:
