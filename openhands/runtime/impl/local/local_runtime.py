@@ -697,6 +697,8 @@ def _create_server(
 
     log_thread_exit_event = threading.Event()
 
+    ng_openhands_should_log = os.environ.get("NG_OPENHANDS_SHOULD_LOG", "").lower() == "true"
+
     # Start a thread to read and log server output
     def log_output() -> None:
         if not server_process or not server_process.stdout:
@@ -713,8 +715,8 @@ def _create_server(
                 if not line:
                     break
 
-                # TODO revert
-                # logger.info(f'server: {line.strip()}')
+                if ng_openhands_should_log:
+                    logger.info(f'server: {line.strip()}')
 
             # Capture any remaining output
             if not log_thread_exit_event.is_set():
@@ -722,8 +724,8 @@ def _create_server(
                 for line in server_process.stdout:
                     if log_thread_exit_event.is_set():
                         break
-                    # TODO revert
-                    # logger.info(f'server (remaining): {line.strip()}')
+                    if ng_openhands_should_log:
+                        logger.info(f'server (remaining): {line.strip()}')
 
         except Exception as e:
             logger.error(f'Error reading server output: {e}')
