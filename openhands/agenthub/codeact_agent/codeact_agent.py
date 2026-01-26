@@ -1,7 +1,7 @@
 import os
 import sys
 from collections import deque
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from openhands.llm.llm_registry import LLMRegistry
 
@@ -238,7 +238,7 @@ class CodeActAgent(Agent):
             self.pending_actions.append(action)
         return self.pending_actions.popleft()
 
-    async def _nemo_gym_model_call(self, messages: list[Message], tools: list['ChatCompletionToolParam']) -> ModelResponse:
+    async def _nemo_gym_model_call(self, messages: list[Message], tools: list['ChatCompletionToolParam']) -> 'ModelResponse':
         # Remove prompt_token_ids, generation_token_ids, and generation_log_probs from all messages except the last
         # Store removed fields so we can restore them after the completion call
         fields_to_remove = ["prompt_token_ids", "generation_token_ids", "generation_log_probs"]
