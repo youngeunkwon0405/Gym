@@ -90,6 +90,14 @@ class CodeActAgent(Agent):
         # Override with router if needed
         self.llm = self.llm_registry.get_router(self.config)
 
+        from nemo_gym.server_utils import ServerClient
+        from nemo_gym.global_config import get_global_config_dict
+        self.ng_server_client = ServerClient(
+            head_server_config=ServerClient.load_head_server_config(),
+            global_config_dict=get_global_config_dict(),
+        )
+        self.model_server_cookies = None
+
     @property
     def prompt_manager(self) -> PromptManager:
         if self._prompt_manager is None:
@@ -211,7 +219,11 @@ class CodeActAgent(Agent):
                 model_name=self.llm.config.model, agent_name=self.name
             )
         }
-        response = self.llm.completion(**params)
+
+        # Original code:
+        # response = self.llm.completion(**params)
+
+        response = self._nemo_gym_model_call(messages, params['tools'])
 
         ng_openhands_should_log = os.environ.get("NG_OPENHANDS_SHOULD_LOG", "").lower() == "true"
         if ng_openhands_should_log:
@@ -225,6 +237,69 @@ class CodeActAgent(Agent):
         for action in actions:
             self.pending_actions.append(action)
         return self.pending_actions.popleft()
+
+    async def _nemo_gym_model_call(self, messages: list[Message], tools: list['ChatCompletionToolParam']) -> ModelResponse:
+        # Remove prompt_token_ids, generation_token_ids, and generation_log_probs from all messages except the last
+        # Store removed fields so we can restore them after the completion call
+        fields_to_remove = ["prompt_token_ids", "generation_token_ids", "generation_log_probs"]
+        removed_fields: dict[int, dict[str, Any]] = {}
+
+        last_occurrence_idx = -1
+        for i, message in enumerate(reversed(messages)):
+            if all(field in message for field in fields_to_remove):
+                last_occurrence_idx = len(messages) - i - 1
+                break
+
+        for i, message in enumerate[dict](messages):
+            if i == last_occurrence_idx:
+                continue
+            removed_fields[i] = {}
+            for field in fields_to_remove:
+                if field in message:
+                    removed_fields[i][field] = message[field]
+                    del message[field]
+
+        params ={
+            "messages": messages,
+            "tools": tools,
+            **self.llm._nemo_gym_llm_kwargs,
+        }
+
+        # TODO remove
+        print(params, file=sys.stderr)
+
+        from nemo_gym.server_utils import get_response_json, raise_for_status
+
+        model_response = await self.ng_server_client.post(
+            server_name=self.config.model_server.name,
+            url_path="/v1/chat/completions",
+            json=params,
+            cookies=self.model_server_cookies,
+        )
+        # We raise for status here since we expect model calls to always work.
+        await raise_for_status(model_response)
+        model_response_json = await get_response_json(model_response)
+        self.model_server_cookies = model_response.cookies
+
+        response: ModelResponse = ModelResponse.model_validate(model_response_json)
+
+        response_message_dict = model_response_json["choices"][0]["message"]
+        if response_message_dict.get("prompt_token_ids"):
+            response._provider_specific_fields = {
+                "prompt_token_ids": response_message_dict["prompt_token_ids"],
+                "generation_token_ids": response_message_dict["generation_token_ids"],
+                "generation_log_probs": response_message_dict["generation_log_probs"],
+            }
+
+        # TODO remove
+        print(response, file=sys.stderr)
+
+        # Restore the removed token fields to messages
+        for i, fields in removed_fields.items():
+            for field, value in fields.items():
+                messages[i][field] = value
+
+        return response
 
     def _get_initial_user_message(self, history: list[Event]) -> MessageAction:
         """Finds the initial user message action from the full history."""
