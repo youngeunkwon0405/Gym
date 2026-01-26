@@ -683,6 +683,11 @@ def _create_server(
     # Prepend the interpreter's bin directory to PATH for subprocesses
     env['PATH'] = f'{_python_bin_path()}{os.pathsep}{env.get("PATH", "")}'
 
+    # NG Openhands should log propagation
+    ng_openhands_should_log = os.environ.get("NG_OPENHANDS_SHOULD_LOG", "").lower() == "true"
+    if ng_openhands_should_log:
+        env['NG_OPENHANDS_SHOULD_LOG'] = os.environ["NG_OPENHANDS_SHOULD_LOG"]
+
     logger.debug(f'Updated PATH for subprocesses: {env["PATH"]}')
 
     server_process = subprocess.Popen(  # noqa: S603
@@ -697,7 +702,6 @@ def _create_server(
 
     log_thread_exit_event = threading.Event()
 
-    ng_openhands_should_log = os.environ.get("NG_OPENHANDS_SHOULD_LOG", "").lower() == "true"
 
     # Start a thread to read and log server output
     def log_output() -> None:

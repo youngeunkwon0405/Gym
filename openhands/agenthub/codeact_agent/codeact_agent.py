@@ -153,7 +153,7 @@ class CodeActAgent(Agent):
         # Only clear pending actions, not LLM metrics
         self.pending_actions.clear()
 
-    def step(self, state: State) -> 'Action':
+    async def step(self, state: State) -> 'Action':
         """Performs one step using the CodeAct Agent.
 
         This includes gathering info on previous steps and prompting the model to make a command to execute.
@@ -212,9 +212,16 @@ class CodeActAgent(Agent):
             )
         }
         response = self.llm.completion(**params)
-        logger.debug(f'Response from LLM: {response}')
+
+        ng_openhands_should_log = os.environ.get("NG_OPENHANDS_SHOULD_LOG", "").lower() == "true"
+        if ng_openhands_should_log:
+            logger.debug(f'Response from LLM: {response}')
+
         actions = self.response_to_actions(response)
-        logger.debug(f'Actions after response_to_actions: {actions}')
+
+        if ng_openhands_should_log:
+            logger.debug(f'Actions after response_to_actions: {actions}')
+
         for action in actions:
             self.pending_actions.append(action)
         return self.pending_actions.popleft()
