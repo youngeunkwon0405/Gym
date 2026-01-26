@@ -4,6 +4,7 @@ This is similar to the functionality of `CodeActResponseParser`.
 """
 
 import json
+from os import getenv
 
 from litellm import (
     ModelResponse,
@@ -125,7 +126,8 @@ def response_to_actions(
                 # Set hard timeout if provided (capped at 600 seconds max)
                 if 'timeout' in arguments:
                     try:
-                        action.set_hard_timeout(min(float(arguments['timeout']), 600))
+                        command_execution_timeout = int(getenv("COMMAND_EXEC_TIMEOUT", "300"))
+                        action.set_hard_timeout(min(float(arguments['timeout']), command_execution_timeout))
                     except ValueError as e:
                         raise FunctionCallValidationError(
                             f"Invalid float passed to 'timeout' argument: {arguments['timeout']}"
