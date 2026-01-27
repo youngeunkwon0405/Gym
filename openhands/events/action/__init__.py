@@ -23,6 +23,13 @@ from openhands.events.action.files import (
 )
 from openhands.events.action.mcp import MCPAction
 from openhands.events.action.message import MessageAction, SystemMessageAction
+from openhands.events.action.opencode import (
+    GlobAction,
+    GrepAction,
+    ListDirAction,
+    OpenCodeReadAction,
+    OpenCodeWriteAction,
+)
 
 __all__ = [
     'Action',
@@ -47,4 +54,10 @@ __all__ = [
     'TaskTrackingAction',
     'ActionSecurityRisk',
     'LoopRecoveryAction',
+    # OpenCode-style actions
+    'GlobAction',
+    'GrepAction',
+    'ListDirAction',
+    'OpenCodeReadAction',
+    'OpenCodeWriteAction',
 ]
