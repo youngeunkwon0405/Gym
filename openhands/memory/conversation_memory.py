@@ -21,6 +21,13 @@ from openhands.events.action import (
     TaskTrackingAction,
 )
 from openhands.events.action.mcp import MCPAction
+from openhands.events.action.opencode import (
+    GlobAction,
+    GrepAction,
+    ListDirAction,
+    OpenCodeReadAction,
+    OpenCodeWriteAction,
+)
 from openhands.events.action.message import SystemMessageAction
 from openhands.events.event import Event, RecallType
 from openhands.events.observation import (
@@ -232,6 +239,12 @@ class ConversationMemory:
                 BrowseURLAction,
                 MCPAction,
                 TaskTrackingAction,
+                # OpenCode-style actions
+                GlobAction,
+                GrepAction,
+                ListDirAction,
+                OpenCodeReadAction,
+                OpenCodeWriteAction,
             ),
         ) or (isinstance(action, CmdRunAction) and action.source == 'agent'):
             tool_metadata = action.tool_call_metadata
