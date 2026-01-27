@@ -24,7 +24,12 @@ from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import APIKeyHeader
-from openhands_aci.editor.editor import OHEditor
+# Use OpenCodeEditor with fuzzy matching instead of default OHEditor
+try:
+    from openhands.agenthub.codeact_agent.tools.opencode_editor import OpenCodeEditor as OHEditor
+except ImportError:
+    # Fallback to standard OHEditor if OpenCodeEditor not available (e.g., in sandbox)
+    from openhands_aci.editor.editor import OHEditor
 from openhands_aci.editor.exceptions import ToolError
 from openhands_aci.editor.results import ToolResult
 from openhands_aci.utils.diff import get_diff
