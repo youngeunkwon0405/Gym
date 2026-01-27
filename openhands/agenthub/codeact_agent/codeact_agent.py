@@ -124,6 +124,15 @@ class CodeActAgent(Agent):
             )
 
         tools = []
+        # Enable OpenCode-style tools by default
+        tools.append(ReadTool)
+        tools.append(WriteTool)
+        tools.append(EditTool)
+        # Add file search tools
+        tools.append(GlobTool)
+        tools.append(GrepTool)
+        tools.append(ListDirTool)
+
         if self.config.enable_cmd:
             tools.append(create_cmd_run_tool(use_short_description=use_short_tool_desc))
         if self.config.enable_think:
@@ -143,27 +152,6 @@ class CodeActAgent(Agent):
             # In plan mode, we use the task_tracker tool for task management
             tools.append(create_task_tracker_tool(use_short_tool_desc))
 
-        # Check if we should use OpenCode-style tools instead of str_replace_editor
-        use_opencode_tools = getattr(self.config, "use_opencode_tools", False)
-
-        if use_opencode_tools:
-            # Use OpenCode-style separate tools for read, write, edit
-            tools.append(ReadTool)
-            tools.append(WriteTool)
-            tools.append(EditTool)
-            # Add file search tools
-            tools.append(GlobTool)
-            tools.append(GrepTool)
-            tools.append(ListDirTool)
-        elif self.config.enable_llm_editor:
-            tools.append(LLMBasedFileEditTool)
-        elif self.config.enable_editor:
-            tools.append(
-                create_str_replace_editor_tool(
-                    use_short_description=use_short_tool_desc,
-                    runtime_type=self.config.runtime,
-                )
-            )
         return tools
 
     def reset(self) -> None:
