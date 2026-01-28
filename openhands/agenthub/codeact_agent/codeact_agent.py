@@ -292,7 +292,7 @@ class CodeActAgent(Agent):
         # TODO remove
         logger.error(f"LOG FILE: {log_file}")
         _d = {
-            'messages': message_dicts,
+            'messages': [m.model_dump() for m in messages],
             'response': model_response_json,
             'provider_specific_fields': provider_specific_fields,
             # 'args': args,
