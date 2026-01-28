@@ -1,4 +1,3 @@
-from nt import environ
 import os
 import sys
 from collections import deque
