@@ -1,5 +1,8 @@
 import os
 import sys
+import time
+import json
+import tempfile
 from collections import deque
 from typing import TYPE_CHECKING, Any
 
@@ -272,12 +275,29 @@ class CodeActAgent(Agent):
         response: ModelResponse = ModelResponse.model_validate(model_response_json)
 
         response_message_dict = model_response_json["choices"][0]["message"]
+        provider_specific_fields = dict()
         if response_message_dict.get("prompt_token_ids"):
-            response._provider_specific_fields = {
+            provider_specific_fields = {
                 "prompt_token_ids": response_message_dict["prompt_token_ids"],
                 "generation_token_ids": response_message_dict["generation_token_ids"],
                 "generation_log_probs": response_message_dict["generation_log_probs"],
             }
+
+        # Save the llm completion. See the original code in openhands/llm/llm.py
+        log_file = os.path.join(
+            self.llm.config.log_completions_folder,
+            f'{self.llm.config.model.replace("/", "__")}-{time.time()}.json',
+        )
+        _d = {
+            'messages': messages,
+            'response': response,
+            'provider_specific_fields': provider_specific_fields,
+        }
+
+        temp_fd, temp_path = tempfile.mkstemp(dir=os.path.dirname(log_file))
+        with os.fdopen(temp_fd, 'w') as f:
+            f.write(json.dumps(_d))
+        os.replace(temp_path, log_file)
 
         return response
 
