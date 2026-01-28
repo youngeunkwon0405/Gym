@@ -239,34 +239,22 @@ class CodeActAgent(Agent):
         return self.pending_actions.popleft()
 
     async def _nemo_gym_model_call(self, messages: list[Message], tools: list['ChatCompletionToolParam']) -> ModelResponse:
-        # Remove prompt_token_ids, generation_token_ids, and generation_log_probs from all messages except the last
-        # Store removed fields so we can restore them after the completion call
-        fields_to_remove = ["prompt_token_ids", "generation_token_ids", "generation_log_probs"]
-        removed_fields: dict[int, dict[str, Any]] = {}
-
-        last_occurrence_idx = -1
-        for i, message in enumerate(reversed(messages)):
-            if all(field in message for field in fields_to_remove):
-                last_occurrence_idx = len(messages) - i - 1
-                break
-
-        for i, message in enumerate[dict](messages):
-            if i == last_occurrence_idx:
-                continue
-            removed_fields[i] = {}
-            for field in fields_to_remove:
-                if field in message:
-                    removed_fields[i][field] = message[field]
-                    del message[field]
-
         params ={
             "messages": [m.model_dump() for m in messages],
             "tools": tools,
             **self.llm._nemo_gym_llm_kwargs,
         }
 
-        # TODO remove
-        logger.error("-" * 40 + "\nPARAMS: " + repr(params))
+        # Remove prompt_token_ids, generation_token_ids, and generation_log_probs from all messages except the last
+        fields_to_remove = ["prompt_token_ids", "generation_token_ids", "generation_log_probs"]
+        last_occurrence_idx_seen = False
+        for message in reversed(params["messages"]):
+            if last_occurrence_idx_seen:
+                for field in fields_to_remove:
+                    if field in message:
+                        del message[field]
+            elif all(field in message for field in fields_to_remove):
+                last_occurrence_idx_seen = True
 
         from nemo_gym.server_utils import get_response_json, raise_for_status
 
@@ -290,14 +278,6 @@ class CodeActAgent(Agent):
                 "generation_token_ids": response_message_dict["generation_token_ids"],
                 "generation_log_probs": response_message_dict["generation_log_probs"],
             }
-
-        # TODO remove
-        logger.error("-" * 40 + "\nRESPONSE: " + repr(response))
-
-        # Restore the removed token fields to messages
-        for i, fields in removed_fields.items():
-            for field, value in fields.items():
-                messages[i][field] = value
 
         return response
 
