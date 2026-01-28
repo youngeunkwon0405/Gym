@@ -292,6 +292,14 @@ class CodeActAgent(Agent):
             'messages': messages,
             'response': response,
             'provider_specific_fields': provider_specific_fields,
+            # 'args': args,
+            'kwargs': {
+                k: v
+                for k, v in params.items()
+                if k not in ('messages', 'client')
+            },
+            'timestamp': time.time(),
+            # 'cost': cost,
         }
 
         temp_fd, temp_path = tempfile.mkstemp(dir=os.path.dirname(log_file))
