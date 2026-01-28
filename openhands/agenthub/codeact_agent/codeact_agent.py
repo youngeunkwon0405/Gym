@@ -9,8 +9,8 @@ if TYPE_CHECKING:
     from litellm import ChatCompletionToolParam
 
     from openhands.events.action import Action
-    from openhands.llm.llm import ModelResponse
 
+from openhands.llm.llm import ModelResponse
 import openhands.agenthub.codeact_agent.function_calling as codeact_function_calling
 from openhands.agenthub.codeact_agent.tools.bash import create_cmd_run_tool
 from openhands.agenthub.codeact_agent.tools.browser import BrowserTool
@@ -238,7 +238,7 @@ class CodeActAgent(Agent):
             self.pending_actions.append(action)
         return self.pending_actions.popleft()
 
-    async def _nemo_gym_model_call(self, messages: list[Message], tools: list['ChatCompletionToolParam']) -> 'ModelResponse':
+    async def _nemo_gym_model_call(self, messages: list[Message], tools: list['ChatCompletionToolParam']) -> ModelResponse:
         # Remove prompt_token_ids, generation_token_ids, and generation_log_probs from all messages except the last
         # Store removed fields so we can restore them after the completion call
         fields_to_remove = ["prompt_token_ids", "generation_token_ids", "generation_log_probs"]
