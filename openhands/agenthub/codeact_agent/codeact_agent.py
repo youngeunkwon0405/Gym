@@ -242,8 +242,9 @@ class CodeActAgent(Agent):
         return self.pending_actions.popleft()
 
     async def _nemo_gym_model_call(self, messages: list[Message], tools: list['ChatCompletionToolParam']) -> ModelResponse:
+        message_dicts = [m.model_dump() for m in messages]
         params ={
-            "messages": [m.model_dump() for m in messages],
+            "messages": message_dicts,
             "tools": tools,
             **self.llm._nemo_gym_llm_kwargs,
         }
@@ -251,7 +252,7 @@ class CodeActAgent(Agent):
         # Remove prompt_token_ids, generation_token_ids, and generation_log_probs from all messages except the last
         fields_to_remove = ["prompt_token_ids", "generation_token_ids", "generation_log_probs"]
         last_occurrence_idx_seen = False
-        for message in reversed(params["messages"]):
+        for message in reversed(message_dicts):
             if last_occurrence_idx_seen:
                 for field in fields_to_remove:
                     if field in message:
@@ -291,8 +292,8 @@ class CodeActAgent(Agent):
         # TODO remove
         logger.error(f"LOG FILE: {log_file}")
         _d = {
-            'messages': messages,
-            'response': response,
+            'messages': message_dicts,
+            'response': model_response_json,
             'provider_specific_fields': provider_specific_fields,
             # 'args': args,
             'kwargs': {
