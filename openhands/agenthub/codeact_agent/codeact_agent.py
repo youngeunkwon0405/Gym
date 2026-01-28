@@ -1,3 +1,4 @@
+from nt import environ
 import os
 import sys
 from collections import deque
@@ -271,7 +272,7 @@ class CodeActAgent(Agent):
         from nemo_gym.server_utils import get_response_json, raise_for_status
 
         model_response = await self.ng_server_client.post(
-            server_name=self.config.model_server.name,
+            server_name=os.getenv("NEMO_GYM_MODEL_SERVER_NAME"),
             url_path="/v1/chat/completions",
             json=params,
             cookies=self.model_server_cookies,
