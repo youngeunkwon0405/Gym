@@ -18,7 +18,6 @@ from .opencode_impl import (
     write_file_opencode,
 )
 from .read import ReadTool
-from .str_replace_editor import create_str_replace_editor_tool
 from .think import ThinkTool
 from .write import WriteTool
 
@@ -26,7 +25,6 @@ __all__ = [
     "BrowserTool",
     "CondensationRequestTool",
     "create_cmd_run_tool",
-    "create_str_replace_editor_tool",
     "edit_file_opencode",
     "EditTool",
     "FinishTool",
