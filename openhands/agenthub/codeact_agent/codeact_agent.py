@@ -266,7 +266,7 @@ class CodeActAgent(Agent):
         }
 
         # TODO remove
-        print(params, file=sys.stderr)
+        logger.error(params)
 
         from nemo_gym.server_utils import get_response_json, raise_for_status
 
@@ -292,7 +292,7 @@ class CodeActAgent(Agent):
             }
 
         # TODO remove
-        print(response, file=sys.stderr)
+        logger.error(response)
 
         # Restore the removed token fields to messages
         for i, fields in removed_fields.items():
