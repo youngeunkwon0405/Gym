@@ -260,7 +260,7 @@ class CodeActAgent(Agent):
                     del message[field]
 
         params ={
-            "messages": messages,
+            "messages": [m.model_dump() for m in messages],
             "tools": tools,
             **self.llm._nemo_gym_llm_kwargs,
         }
