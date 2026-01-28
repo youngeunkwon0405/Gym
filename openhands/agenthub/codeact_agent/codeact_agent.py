@@ -223,7 +223,7 @@ class CodeActAgent(Agent):
         # Original code:
         # response = self.llm.completion(**params)
 
-        response = self._nemo_gym_model_call(messages, params['tools'])
+        response = await self._nemo_gym_model_call(messages, params['tools'])
 
         ng_openhands_should_log = os.environ.get("NG_OPENHANDS_SHOULD_LOG", "").lower() == "true"
         if ng_openhands_should_log:
