@@ -289,8 +289,6 @@ class CodeActAgent(Agent):
             self.llm.config.log_completions_folder,
             f'{self.llm.config.model.replace("/", "__")}-{time.time()}.json',
         )
-        # TODO remove
-        logger.error(f"LOG FILE: {log_file}")
         _d = {
             'messages': [m.model_dump() for m in messages],
             'response': model_response_json,
