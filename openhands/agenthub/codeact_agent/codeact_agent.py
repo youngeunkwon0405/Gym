@@ -243,8 +243,6 @@ class CodeActAgent(Agent):
 
     async def _nemo_gym_model_call(self, messages: list[Message], tools: list['ChatCompletionToolParam']) -> ModelResponse:
         message_dicts = [m.model_dump() for m in messages]
-        # TODO remove
-        logger.error(f"MESSAGE DICTS: {json.dumps(message_dicts, indent=4)}")
         params ={
             "messages": message_dicts,
             "tools": tools,
