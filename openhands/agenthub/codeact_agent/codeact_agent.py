@@ -285,6 +285,7 @@ class CodeActAgent(Agent):
                 "generation_token_ids": response_message_dict["generation_token_ids"],
                 "generation_log_probs": response_message_dict["generation_log_probs"],
             }
+            response._provider_specific_fields = provider_specific_fields
 
         # Save the llm completion. See the original code in openhands/llm/llm.py
         log_file = os.path.join(
