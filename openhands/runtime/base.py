@@ -37,6 +37,7 @@ from openhands.events.action import (
     FileWriteAction,
     IPythonRunCellAction,
     TaskTrackingAction,
+    ValidationFailureAction,
 )
 from openhands.events.action.mcp import MCPAction
 from openhands.events.event import Event
@@ -49,6 +50,7 @@ from openhands.events.observation import (
     Observation,
     TaskTrackingObservation,
     UserRejectObservation,
+    ValidationFailureObservation,
 )
 from openhands.events.serialization.action import ACTION_TYPE_TO_CLASS
 from openhands.integrations.provider import (
@@ -968,6 +970,12 @@ fi
         if not action.runnable:
             if isinstance(action, AgentThinkAction):
                 return AgentThinkObservation('Your thought has been logged.')
+            elif isinstance(action, ValidationFailureAction):
+                return ValidationFailureObservation(
+                    content=action.error_message,
+                    function_name=action.function_name,
+                    error_message=action.error_message,
+                )
             elif isinstance(action, TaskTrackingAction):
                 # Get the session-specific task file path
                 conversation_dir = get_conversation_dir(
