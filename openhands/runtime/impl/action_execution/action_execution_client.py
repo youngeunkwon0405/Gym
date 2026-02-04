@@ -29,6 +29,7 @@ from openhands.events.action import (
     FileReadAction,
     FileWriteAction,
     IPythonRunCellAction,
+    ValidationFailureAction,
 )
 from openhands.events.action.opencode import (
     GlobAction,
@@ -46,6 +47,7 @@ from openhands.events.observation import (
     NullObservation,
     Observation,
     UserRejectObservation,
+    ValidationFailureObservation,
 )
 from openhands.events.serialization import event_to_dict, observation_from_dict
 from openhands.events.serialization.action import ACTION_TYPE_TO_CLASS
@@ -298,6 +300,12 @@ class ActionExecutionClient(Runtime):
             if not action.runnable:
                 if isinstance(action, AgentThinkAction):
                     return AgentThinkObservation('Your thought has been logged.')
+                elif isinstance(action, ValidationFailureAction):
+                    return ValidationFailureObservation(
+                        content=action.error_message,
+                        function_name=action.function_name,
+                        error_message=action.error_message,
+                    )
                 return NullObservation('')
             if (
                 hasattr(action, 'confirmation_state')

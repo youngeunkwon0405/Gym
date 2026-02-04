@@ -12,6 +12,7 @@ from openhands.events.action.agent import (
     LoopRecoveryAction,
     RecallAction,
     TaskTrackingAction,
+    ValidationFailureAction,
 )
 from openhands.events.action.browse import BrowseInteractiveAction, BrowseURLAction
 from openhands.events.action.commands import CmdRunAction, IPythonRunCellAction
@@ -54,6 +55,7 @@ __all__ = [
     'TaskTrackingAction',
     'ActionSecurityRisk',
     'LoopRecoveryAction',
+    'ValidationFailureAction',
     # OpenCode-style actions
     'GlobAction',
     'GrepAction',

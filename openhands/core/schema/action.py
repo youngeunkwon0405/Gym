@@ -101,6 +101,9 @@ class ActionType(str, Enum):
     LOOP_RECOVERY = 'loop_recovery'
     """Recover dead loop."""
 
+    VALIDATION_FAILURE = 'validation_failure'
+    """Represents a validation failure for a function call."""
+
     # OpenCode-style actions
     GLOB = 'glob'
     """Searches for files matching a glob pattern."""
@@ -116,3 +119,4 @@ class ActionType(str, Enum):
 
     OPENCODE_WRITE = 'opencode_write'
     """Writes a file with LSP diagnostics after write."""
+

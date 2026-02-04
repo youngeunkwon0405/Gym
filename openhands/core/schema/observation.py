@@ -62,6 +62,9 @@ class ObservationType(str, Enum):
     LOOP_DETECTION = 'loop_detection'
     """Results of a dead-loop detection"""
 
+    VALIDATION_FAILURE = 'validation_failure'
+    """Result of a validation failure for a function call"""
+
     # OpenCode-style observations
     GLOB = 'glob'
     """Result of a glob file search operation."""
@@ -77,3 +80,4 @@ class ObservationType(str, Enum):
 
     OPENCODE_WRITE = 'opencode_write'
     """Result of an OpenCode-style file write operation with diagnostics."""
+
