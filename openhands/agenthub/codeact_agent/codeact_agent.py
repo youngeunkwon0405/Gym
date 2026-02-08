@@ -226,7 +226,7 @@ class CodeActAgent(Agent):
         # Original code:
         # response = self.llm.completion(**params)
 
-        start_time = -time.time()
+        start_time = time.time()
         response = await self._nemo_gym_model_call(messages, params['tools'])
         self.update_model_call_time(start_time)
 
