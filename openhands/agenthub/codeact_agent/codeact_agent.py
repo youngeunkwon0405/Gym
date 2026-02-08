@@ -226,7 +226,9 @@ class CodeActAgent(Agent):
         # Original code:
         # response = self.llm.completion(**params)
 
+        start_time = -time.time()
         response = await self._nemo_gym_model_call(messages, params['tools'])
+        self.update_model_call_time(start_time)
 
         ng_openhands_should_log = os.environ.get("NG_OPENHANDS_SHOULD_LOG", "").lower() == "true"
         if ng_openhands_should_log:
@@ -240,6 +242,19 @@ class CodeActAgent(Agent):
         for action in actions:
             self.pending_actions.append(action)
         return self.pending_actions.popleft()
+
+    def update_model_call_time(self, start_time: float) -> None:
+        import os, json
+
+        metrics_fpath = os.environ["NEMO_GYM_METRICS_FPATH"]
+        with open(metrics_fpath) as f:
+            existing_dict = json.loads(f.read())
+
+        model_call_time_taken = existing_dict.get("total_model_call_time", 0.0)
+        existing_dict["total_model_call_time"] = model_call_time_taken + time.time() - start_time
+
+        with open(metrics_fpath, "w") as f:
+            json.dump(existing_dict, f)
 
     async def _nemo_gym_model_call(self, messages: list[Message], tools: list['ChatCompletionToolParam']) -> ModelResponse:
         message_dicts = [m.model_dump() for m in messages]

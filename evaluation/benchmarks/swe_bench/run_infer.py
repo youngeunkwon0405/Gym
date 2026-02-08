@@ -3,7 +3,7 @@ import copy
 import json
 import os
 import tempfile
-from typing import Any, Literal, Optional
+from typing import Any, Dict, Literal, Optional
 import time
 import pandas as pd
 import toml
@@ -137,6 +137,21 @@ class Profiler:
 
         with open(log_path, "w") as f:
             f.write(res)
+
+
+def update_metrics(update_dict: Dict[str, Any]) -> None:
+    import os, json
+
+    metrics_fpath = os.environ["NEMO_GYM_METRICS_FPATH"]
+    with open(metrics_fpath) as f:
+        existing_dict = json.loads(f.read())
+
+    existing_dict = {k: v for k, v in existing_dict.items() if v is not None}
+    update_dict = {k: v for k, v in update_dict.items() if v is not None}
+
+    with open(metrics_fpath, "w") as f:
+        json.dump(existing_dict | update_dict, f)
+
 
 ########################################
 # END Custom profiling code
@@ -797,16 +812,19 @@ def process_instance(
     start_time = time.perf_counter()
     runtime = create_runtime(config)
     end_time = time.perf_counter()
+    update_metrics({"create_runtime_time": end_time - start_time})
     print(f"create runtime: {end_time - start_time} seconds", flush = True)
     start_time = time.perf_counter()
     call_async_from_sync(runtime.connect)
     end_time = time.perf_counter()
+    update_metrics({"connect_to_runtime_time": end_time - start_time})
     print(f"connect to runtime: {end_time - start_time} seconds", flush = True)
 
     try:
         start_time = time.perf_counter()
         initialize_runtime(runtime, instance, metadata)
         end_time = time.perf_counter()
+        update_metrics({"initialize_runtime_time": end_time - start_time})
         print(f"init runtime: {end_time - start_time} seconds", flush = True)
         message_action = get_instruction(instance, metadata)
 
