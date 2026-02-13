@@ -12,7 +12,6 @@ Usage:
 - Results are returned with line numbers starting at 1
 - You can read multiple files in a single response by calling this tool multiple times
 - If you read a file that exists but has empty contents, a warning will be shown
-- This tool can also read image files (jpeg, png, gif, webp)
 
 Parameters:
 - file_path: The absolute path to the file to read

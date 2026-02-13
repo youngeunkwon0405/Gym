@@ -895,56 +895,80 @@ class ActionExecutor:
         )
 
     async def grep(self, action: GrepAction) -> Observation:
-        """Execute grep content search using ripgrep or grep."""
+        """Execute grep content search using ripgrep or grep.
+
+        Results are sorted by file modification time (newest first) and limited
+        to 100 matches.  Uses ripgrep when available (respects .gitignore) with
+        a fallback to grep -E for extended regex support (e.g. | alternation).
+        """
         assert self.bash_session is not None
         working_dir = self.bash_session.cwd
         search_path = self._resolve_path(action.path, working_dir)
 
         import subprocess
 
-        output = ""
+        raw_lines: list[str] = []
         limit = 100
+
+        # Ensure include pattern matches recursively (e.g., "*.py" -> "**/*.py")
+        include = action.include
+        if include and not include.startswith('**/'):
+            include = '**/' + include
 
         # Try ripgrep first (respects .gitignore)
         try:
             cmd = ['rg', '-n', action.pattern, search_path]
-            if action.include:
-                cmd = ['rg', '-n', '-g', action.include, action.pattern, search_path]
+            if include:
+                cmd = ['rg', '-n', '-g', include, action.pattern, search_path]
 
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=30, cwd=working_dir
             )
             if result.stdout.strip():
-                lines = result.stdout.strip().split('\n')
-                if len(lines) > limit:
-                    output = '\n'.join(lines[:limit])
-                    output += f'\n\n(Results truncated, showing {limit} of {len(lines)}+ matches)'
-                else:
-                    output = '\n'.join(lines)
+                raw_lines = [l for l in result.stdout.strip().split('\n') if l.strip()]
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
 
-        # Fallback to grep
-        if not output:
+        # Fallback to grep -E (extended regex for | alternation support)
+        if not raw_lines:
             try:
                 if action.include:
-                    # Use find + grep for file filtering
+                    # Use find + grep -E for file filtering with extended regex
                     result = subprocess.run(
                         f'find {search_path} -type f -name "{action.include}" '
-                        f'-exec grep -Hn "{action.pattern}" {{}} \\; 2>/dev/null | head -{limit}',
+                        f'-exec grep -EHn "{action.pattern}" {{}} \\; 2>/dev/null',
                         shell=True, capture_output=True, text=True, timeout=30, cwd=working_dir
                     )
                 else:
                     result = subprocess.run(
-                        f'grep -rn "{action.pattern}" {search_path} 2>/dev/null | head -{limit}',
+                        f'grep -Ern "{action.pattern}" {search_path} 2>/dev/null',
                         shell=True, capture_output=True, text=True, timeout=30, cwd=working_dir
                     )
-                output = result.stdout.strip() or "No matches found"
+                if result.stdout.strip():
+                    raw_lines = [l for l in result.stdout.strip().split('\n') if l.strip()]
             except (subprocess.TimeoutExpired, Exception):
-                output = "No matches found"
+                pass
 
-        if not output:
+        if not raw_lines:
             output = "No matches found"
+        else:
+            # Sort results by file modification time (newest first).
+            # Each line has the format  filepath:linenum:content
+            def _mtime_key(line: str) -> float:
+                filepath = line.split(':')[0]
+                try:
+                    return os.path.getmtime(filepath)
+                except OSError:
+                    return 0.0
+
+            raw_lines.sort(key=_mtime_key, reverse=True)
+
+            # Apply limit
+            if len(raw_lines) > limit:
+                output = '\n'.join(raw_lines[:limit])
+                output += f'\n\n(Results truncated, showing {limit} of {len(raw_lines)}+ matches)'
+            else:
+                output = '\n'.join(raw_lines)
 
         return CmdOutputObservation(
             content=output,
