@@ -182,6 +182,53 @@ class ListDirAction(Action):
 
 
 @dataclass
+class QuestionAction(Action):
+    """Asks the user structured questions for clarification.
+
+    Features:
+    - Present one or more questions with options
+    - Supports single-select and multi-select questions
+
+    Attributes:
+        questions: List of question objects, each with id, prompt, and options
+    """
+
+    questions: list[dict] = field(default_factory=list)
+    thought: str = ""
+    action: str = ActionType.QUESTION
+    runnable: ClassVar[bool] = True
+    security_risk: ActionSecurityRisk = ActionSecurityRisk.UNKNOWN
+
+    @property
+    def message(self) -> str:
+        count = len(self.questions)
+        return f"Asking {count} question{'s' if count != 1 else ''}"
+
+
+@dataclass
+class ApplyPatchAction(Action):
+    """Applies a unified diff patch to one or more files.
+
+    Features:
+    - Applies unified diff format patches
+    - Supports multi-file patches
+
+    Attributes:
+        patchText: The unified diff patch text to apply
+    """
+
+    patchText: str = ""
+    thought: str = ""
+    action: str = ActionType.APPLY_PATCH
+    runnable: ClassVar[bool] = True
+    security_risk: ActionSecurityRisk = ActionSecurityRisk.UNKNOWN
+
+    @property
+    def message(self) -> str:
+        return "Applying patch"
+
+
+@dataclass
 class TodoReadAction(Action):
     """Reads the current todo/task list.
 

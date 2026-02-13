@@ -100,9 +100,11 @@ class OpenCodeAgent(Agent):
             # Build template overrides from custom paths
             template_overrides = {}
             if self.config.system_prompt_path:
-                template_overrides['system_prompt.j2'] = self.config.system_prompt_path
+                template_overrides["system_prompt.j2"] = self.config.system_prompt_path
             if self.config.system_prompt_long_horizon_path:
-                template_overrides['system_prompt_long_horizon.j2'] = self.config.system_prompt_long_horizon_path
+                template_overrides["system_prompt_long_horizon.j2"] = (
+                    self.config.system_prompt_long_horizon_path
+                )
 
             self._prompt_manager = PromptManager(
                 prompt_dir=prompt_dir,
@@ -127,14 +129,14 @@ class OpenCodeAgent(Agent):
         tools.append(ListDirTool)
 
         # User interaction tools
-        tools.append(QuestionTool)
+        # tools.append(QuestionTool)
 
         # Task management tools
         tools.append(TodoReadTool)
         tools.append(TodoWriteTool)
 
         # Structured editing
-        tools.append(ApplyPatchTool)
+        # tools.append(ApplyPatchTool)
 
         # Command execution
         if self.config.enable_cmd:

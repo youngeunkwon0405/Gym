@@ -25,11 +25,13 @@ from openhands.events.action.files import (
 from openhands.events.action.mcp import MCPAction
 from openhands.events.action.message import MessageAction, SystemMessageAction
 from openhands.events.action.opencode import (
+    ApplyPatchAction,
     GlobAction,
     GrepAction,
     ListDirAction,
     OpenCodeReadAction,
     OpenCodeWriteAction,
+    QuestionAction,
     TodoReadAction,
     TodoWriteAction,
 )
@@ -64,6 +66,8 @@ __all__ = [
     'ListDirAction',
     'OpenCodeReadAction',
     'OpenCodeWriteAction',
+    'QuestionAction',
+    'ApplyPatchAction',
     'TodoReadAction',
     'TodoWriteAction',
 ]
