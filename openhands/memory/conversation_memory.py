@@ -22,11 +22,13 @@ from openhands.events.action import (
 )
 from openhands.events.action.mcp import MCPAction
 from openhands.events.action.opencode import (
+    ApplyPatchAction,
     GlobAction,
     GrepAction,
     ListDirAction,
     OpenCodeReadAction,
     OpenCodeWriteAction,
+    QuestionAction,
     TodoReadAction,
     TodoWriteAction,
 )
@@ -248,6 +250,8 @@ class ConversationMemory:
                 ListDirAction,
                 OpenCodeReadAction,
                 OpenCodeWriteAction,
+                QuestionAction,
+                ApplyPatchAction,
                 TodoReadAction,
                 TodoWriteAction,
             ),
