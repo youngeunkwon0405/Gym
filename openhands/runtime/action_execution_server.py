@@ -46,6 +46,7 @@ from openhands.core.logger import get_uvicorn_json_log_config
 from openhands.core.logger import openhands_logger as logger
 from openhands.events.action import (
     Action,
+    ApplyPatchAction,
     BrowseInteractiveAction,
     BrowseURLAction,
     CmdRunAction,
@@ -58,6 +59,7 @@ from openhands.events.action import (
     ListDirAction,
     OpenCodeReadAction,
     OpenCodeWriteAction,
+    QuestionAction,
     TodoReadAction,
     TodoWriteAction,
 )
@@ -73,6 +75,10 @@ from openhands.events.observation import (
     Observation,
     TodoReadObservation,
     TodoWriteObservation,
+)
+from openhands.events.observation.opencode import (
+    ApplyPatchObservation,
+    QuestionObservation,
 )
 from openhands.events.serialization import event_from_dict, event_to_dict
 from openhands.runtime.browser import browse
@@ -1055,6 +1061,64 @@ class ActionExecutor:
             command_id=-1,
             command=f"list_dir {action.path}",
         )
+
+    async def question(self, action: QuestionAction) -> Observation:
+        """Handle a question action. Returns an observation with the questions.
+
+        Note: In a full implementation, this would interact with the user.
+        In sandbox/evaluation mode, we return the questions as-is since
+        the controller handles user interaction.
+        """
+        return QuestionObservation(
+            content=json.dumps(action.questions, indent=2),
+            questions=action.questions,
+        )
+
+    async def apply_patch(self, action: ApplyPatchAction) -> Observation:
+        """Apply a unified diff patch to files."""
+        assert self.bash_session is not None
+        try:
+            # Write the patch to a temporary file and apply with git apply
+            import tempfile
+            patch_text = action.patchText
+            with tempfile.NamedTemporaryFile(
+                mode='w', suffix='.patch', delete=False
+            ) as f:
+                f.write(patch_text)
+                patch_file = f.name
+
+            try:
+                result = subprocess.run(
+                    ['git', 'apply', '--verbose', patch_file],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    cwd=self.bash_session.cwd,
+                )
+                if result.returncode == 0:
+                    output = result.stdout.strip() or 'Patch applied successfully.'
+                    # Try to extract changed files from verbose output
+                    files_changed = [
+                        line.split(':')[0].strip()
+                        for line in result.stderr.strip().split('\n')
+                        if line.strip()
+                    ]
+                    return ApplyPatchObservation(
+                        content=output,
+                        files_changed=files_changed,
+                        success=True,
+                    )
+                else:
+                    error_msg = result.stderr.strip() or result.stdout.strip()
+                    return ApplyPatchObservation(
+                        content=f'Failed to apply patch: {error_msg}',
+                        success=False,
+                    )
+            finally:
+                os.unlink(patch_file)
+        except Exception as e:
+            logger.exception(f'Error applying patch: {e}')
+            return ErrorObservation(f'Failed to apply patch: {str(e)}')
 
     async def todo_read(self, action: TodoReadAction) -> Observation:
         """Read the current todo list."""
