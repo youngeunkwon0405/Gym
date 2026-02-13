@@ -38,6 +38,7 @@ from openhands.events.observation import (
     AgentCondensationObservation,
     AgentDelegateObservation,
     AgentThinkObservation,
+    ApplyPatchObservation,
     BrowserOutputObservation,
     CmdOutputObservation,
     FileDownloadObservation,
@@ -46,7 +47,10 @@ from openhands.events.observation import (
     FileWriteObservation,
     IPythonRunCellObservation,
     LoopDetectionObservation,
+    QuestionObservation,
     TaskTrackingObservation,
+    TodoReadObservation,
+    TodoWriteObservation,
     UserRejectObservation,
 )
 from openhands.events.observation.agent import (
@@ -580,6 +584,18 @@ class ConversationMemory:
             text = truncate_content(obs.content, max_message_chars)
             message = Message(role='user', content=[TextContent(text=text)])
         elif isinstance(obs, FileDownloadObservation):
+            text = truncate_content(obs.content, max_message_chars)
+            message = Message(role='user', content=[TextContent(text=text)])
+        elif isinstance(obs, TodoReadObservation):
+            text = truncate_content(obs.content, max_message_chars)
+            message = Message(role='user', content=[TextContent(text=text)])
+        elif isinstance(obs, TodoWriteObservation):
+            text = truncate_content(obs.content, max_message_chars)
+            message = Message(role='user', content=[TextContent(text=text)])
+        elif isinstance(obs, QuestionObservation):
+            text = truncate_content(obs.content, max_message_chars)
+            message = Message(role='user', content=[TextContent(text=text)])
+        elif isinstance(obs, ApplyPatchObservation):
             text = truncate_content(obs.content, max_message_chars)
             message = Message(role='user', content=[TextContent(text=text)])
         elif isinstance(obs, LoopDetectionObservation):
