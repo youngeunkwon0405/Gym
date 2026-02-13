@@ -30,6 +30,8 @@ from openhands.events.action.opencode import (
     ListDirAction,
     OpenCodeReadAction,
     OpenCodeWriteAction,
+    TodoReadAction,
+    TodoWriteAction,
 )
 
 __all__ = [
@@ -62,4 +64,6 @@ __all__ = [
     'ListDirAction',
     'OpenCodeReadAction',
     'OpenCodeWriteAction',
+    'TodoReadAction',
+    'TodoWriteAction',
 ]

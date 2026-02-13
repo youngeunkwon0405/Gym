@@ -17,6 +17,8 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from zipfile import ZipFile
+import glob as glob_module
+import subprocess
 
 import puremagic
 from binaryornot.check import is_binary
@@ -56,6 +58,8 @@ from openhands.events.action import (
     ListDirAction,
     OpenCodeReadAction,
     OpenCodeWriteAction,
+    TodoReadAction,
+    TodoWriteAction,
 )
 from openhands.events.event import FileEditSource, FileReadSource
 from openhands.events.observation import (
@@ -67,6 +71,8 @@ from openhands.events.observation import (
     FileWriteObservation,
     IPythonRunCellObservation,
     Observation,
+    TodoReadObservation,
+    TodoWriteObservation,
 )
 from openhands.events.serialization import event_from_dict, event_to_dict
 from openhands.runtime.browser import browse
@@ -216,6 +222,7 @@ class ActionExecutor:
         self._initialized = False
         self.downloaded_files: list[str] = []
         self.downloads_directory = '/workspace/.downloads'
+        self._todos: list[dict] = []  # In-memory todo list storage
 
         self.max_memory_gb: int | None = None
         if _override_max_memory_gb := os.environ.get('RUNTIME_MAX_MEMORY_GB', None):
@@ -817,49 +824,55 @@ class ActionExecutor:
         return FileWriteObservation(content=output, path=filepath)
 
     async def glob(self, action: GlobAction) -> Observation:
-        """Execute glob file search using ripgrep or find."""
+        """Execute glob file search using ripgrep or Python glob."""
         assert self.bash_session is not None
         working_dir = self.bash_session.cwd
         search_path = self._resolve_path(action.path, working_dir)
 
-        import subprocess
+        # Auto-prepend **/ to patterns without a path separator so that
+        # simple patterns like "*.py" search recursively instead of only
+        # matching at the root of the search path.
+        pattern = action.pattern
+        if '/' not in pattern:
+            pattern = '**/' + pattern
 
         files = []
         truncated = False
         limit = 100
 
-        # Try ripgrep first (respects .gitignore, sorts by mtime)
+        # Try ripgrep first (fast, respects .gitignore)
+        # Note: avoid --sortr flag as it requires ripgrep >= 13.0.0
         try:
             result = subprocess.run(
-                ['rg', '--files', '-g', action.pattern, '--sortr', 'modified', search_path],
+                ['rg', '--files', '-g', pattern, search_path],
                 capture_output=True, text=True, timeout=30, cwd=working_dir
             )
             if result.returncode == 0 and result.stdout.strip():
-                all_files = [f.strip() for f in result.stdout.strip().split('\n') if f.strip()]
-                if len(all_files) > limit:
-                    truncated = True
-                files = all_files[:limit]
+                files = [f.strip() for f in result.stdout.strip().split('\n') if f.strip()]
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
 
-        # Fallback to find with mtime sorting
+        # Fallback to Python's glob module (handles ** patterns natively)
         if not files:
             try:
-                result = subprocess.run(
-                    ['find', search_path, '-type', 'f', '-name', action.pattern,
-                     '-printf', '%T@ %p\n'],
-                    capture_output=True, text=True, timeout=30, cwd=working_dir
-                )
-                if result.stdout.strip():
-                    lines = result.stdout.strip().split('\n')
-                    # Sort by mtime (first field) descending
-                    sorted_lines = sorted(lines, key=lambda x: float(x.split()[0]) if x else 0, reverse=True)
-                    all_files = [' '.join(l.split()[1:]) for l in sorted_lines if l]
-                    if len(all_files) > limit:
-                        truncated = True
-                    files = all_files[:limit]
-            except (FileNotFoundError, subprocess.TimeoutExpired, ValueError):
+                full_pattern = os.path.join(search_path, pattern)
+                files = [
+                    f for f in glob_module.glob(full_pattern, recursive=True)
+                    if os.path.isfile(f)
+                ]
+            except Exception:
                 pass
+
+        # Sort by modification time (newest first)
+        try:
+            files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
+        except (OSError, ValueError):
+            pass
+
+        # Apply limit
+        if len(files) > limit:
+            truncated = True
+            files = files[:limit]
 
         # Build output
         if not files:
@@ -1042,6 +1055,46 @@ class ActionExecutor:
             command_id=-1,
             command=f"list_dir {action.path}",
         )
+
+    async def todo_read(self, action: TodoReadAction) -> Observation:
+        """Read the current todo list."""
+        return TodoReadObservation(
+            content=json.dumps(self._todos, indent=2) if self._todos else '[]',
+            todos=list(self._todos),
+        )
+
+    async def todo_write(self, action: TodoWriteAction) -> Observation:
+        """Update the todo list with new or modified items."""
+        try:
+            incoming_todos = action.todos
+            if not isinstance(incoming_todos, list):
+                return ErrorObservation('todos must be a list of todo objects')
+
+            # Build index of existing todos by id
+            existing_by_id = {t['id']: t for t in self._todos if 'id' in t}
+
+            # Merge incoming todos: update existing by id, add new ones
+            for todo in incoming_todos:
+                if not isinstance(todo, dict):
+                    continue
+                todo_id = todo.get('id')
+                if todo_id and todo_id in existing_by_id:
+                    # Update existing todo
+                    existing_by_id[todo_id].update(todo)
+                else:
+                    # Add new todo
+                    self._todos.append(todo)
+                    if todo_id:
+                        existing_by_id[todo_id] = todo
+
+            return TodoWriteObservation(
+                content=json.dumps(self._todos, indent=2),
+                todos=list(self._todos),
+                success=True,
+            )
+        except Exception as e:
+            logger.exception(f'Error updating todos: {e}')
+            return ErrorObservation(f'Failed to update todos: {str(e)}')
 
     async def browse(self, action: BrowseURLAction) -> Observation:
         if self.browser is None:

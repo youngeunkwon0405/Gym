@@ -81,3 +81,9 @@ class ObservationType(str, Enum):
     OPENCODE_WRITE = 'opencode_write'
     """Result of an OpenCode-style file write operation with diagnostics."""
 
+    TODO_READ = 'todo_read'
+    """Result of reading the current todo list."""
+
+    TODO_WRITE = 'todo_write'
+    """Result of updating the todo list."""
+

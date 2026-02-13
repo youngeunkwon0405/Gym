@@ -33,6 +33,8 @@ from openhands.events.action.opencode import (
     ListDirAction,
     OpenCodeReadAction,
     OpenCodeWriteAction,
+    TodoReadAction,
+    TodoWriteAction,
 )
 
 actions = (
@@ -63,6 +65,8 @@ actions = (
     ListDirAction,
     OpenCodeReadAction,
     OpenCodeWriteAction,
+    TodoReadAction,
+    TodoWriteAction,
 )
 
 ACTION_TYPE_TO_CLASS = {action_class.action: action_class for action_class in actions}  # type: ignore[attr-defined]

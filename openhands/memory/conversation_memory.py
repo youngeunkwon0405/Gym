@@ -27,6 +27,8 @@ from openhands.events.action.opencode import (
     ListDirAction,
     OpenCodeReadAction,
     OpenCodeWriteAction,
+    TodoReadAction,
+    TodoWriteAction,
 )
 from openhands.events.action.message import SystemMessageAction
 from openhands.events.event import Event, RecallType
@@ -246,6 +248,8 @@ class ConversationMemory:
                 ListDirAction,
                 OpenCodeReadAction,
                 OpenCodeWriteAction,
+                TodoReadAction,
+                TodoWriteAction,
             ),
         ) or (isinstance(action, CmdRunAction) and action.source == 'agent'):
             tool_metadata = action.tool_call_metadata
