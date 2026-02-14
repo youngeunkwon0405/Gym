@@ -89,8 +89,11 @@ def response_to_actions(
                         raise FunctionCallValidationError(
                             f'Missing required argument "command" in tool call {tool_call.function.name}'
                         )
+
+                    is_input = arguments.get('is_input', 'false') == 'true'
                     action = CmdRunAction(
                         command=arguments['command'],
+                        is_input=is_input,
                     )
                     if 'timeout_ms' in arguments:
                         try:

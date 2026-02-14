@@ -30,6 +30,11 @@ ShellCommandTool = ChatCompletionToolParam(
                     'type': 'number',
                     'description': 'The timeout for the command in milliseconds',
                 },
+                'is_input': {
+                    'type': 'string',
+                    'description': 'If True, the command is an input to the running process. If False, the command is a bash command to be executed in the terminal. Default is False.',
+                    'enum': ['true', 'false'],
+                },
             },
             'additionalProperties': False,
         },
