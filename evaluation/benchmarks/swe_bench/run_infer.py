@@ -105,6 +105,7 @@ def set_dataset_type(dataset_name: str) -> str:
 AGENT_CLS_TO_FAKE_USER_RESPONSE_FN = {
     'CodeActAgent': codeact_user_response,
     'OpenCodeAgent': codeact_user_response,
+    'CodexAgent': codeact_user_response,
 }
 
 
