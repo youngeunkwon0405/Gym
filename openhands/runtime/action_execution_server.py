@@ -1449,68 +1449,110 @@ class ActionExecutor:
         )
 
     async def codex_grep_files(self, action: CodexGrepFilesAction) -> Observation:
-        """Execute Codex-style grep: find files matching pattern, return paths sorted by mtime."""
+        """Execute Codex-style grep: find files matching pattern, return paths sorted by mtime.
+
+        Matches the original Codex implementation: uses ripgrep with --sortr=modified,
+        --files-with-matches, --regexp, and --no-messages flags. Falls back to grep
+        if ripgrep is not available.
+        """
         assert self.bash_session is not None
         working_dir = self.bash_session.cwd
         search_path = self._resolve_path(action.path, working_dir) if action.path else working_dir
 
+        import shlex
         import subprocess
 
-        files: list[str] = []
-        limit = action.limit if action.limit > 0 else 100
+        pattern = action.pattern.strip()
+        if not pattern:
+            return ErrorObservation("pattern must not be empty")
 
-        # Ensure include pattern matches recursively
-        include = action.include
+        limit = min(action.limit, 2000) if action.limit > 0 else 100
+
+        # Normalize include glob: ensure it matches recursively
+        include = (action.include or '').strip() or None
         if include and not include.startswith('**/'):
             include = '**/' + include
 
-        # Try ripgrep first (respects .gitignore, fast)
+        # Verify path exists
+        if not os.path.exists(search_path):
+            return ErrorObservation(f"unable to access `{search_path}`: path does not exist")
+
+        files: list[str] = []
+        rg_available = False
+
+        # Try ripgrep first (matches Codex's Rust implementation exactly)
         try:
-            cmd = ['rg', '-l', action.pattern, search_path]
+            cmd = ['rg', '--files-with-matches', '--sortr=modified', '--regexp', pattern, '--no-messages']
             if include:
-                cmd = ['rg', '-l', '-g', include, action.pattern, search_path]
+                cmd.extend(['--glob', include])
+            cmd.extend(['--', search_path])
 
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=30, cwd=working_dir
             )
-            if result.stdout.strip():
-                files = [f.strip() for f in result.stdout.strip().split('\n') if f.strip()]
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            pass
+            rg_available = True
 
-        # Fallback to grep
-        if not files:
+            if result.returncode == 0 and result.stdout.strip():
+                # rg found matches and already sorted by mtime
+                files = [f.strip() for f in result.stdout.strip().split('\n') if f.strip()]
+            elif result.returncode == 1:
+                # Exit code 1 = no matches (not an error)
+                files = []
+            elif result.returncode not in (0, 1):
+                # rg failed with an error
+                stderr = result.stderr.strip()
+                logger.warning(f"rg failed: {stderr}")
+                # Fall through to grep fallback
+                rg_available = False
+
+        except FileNotFoundError:
+            # rg not installed
+            rg_available = False
+        except subprocess.TimeoutExpired:
+            return ErrorObservation("grep_files timed out after 30 seconds")
+
+        # Fallback to grep if rg is not available
+        if not rg_available:
             try:
-                if action.include:
-                    result = subprocess.run(
-                        f'find {search_path} -type f -name "{action.include}" '
-                        f'-exec grep -l "{action.pattern}" {{}} \\; 2>/dev/null',
-                        shell=True, capture_output=True, text=True, timeout=30, cwd=working_dir
+                if include:
+                    # Convert glob pattern to find-compatible: "**/*.py" -> "*.py"
+                    find_pattern = include
+                    if find_pattern.startswith('**/'):
+                        find_pattern = find_pattern[3:]
+
+                    cmd_str = (
+                        f'grep -rl --include={shlex.quote(find_pattern)} '
+                        f'-E {shlex.quote(pattern)} {shlex.quote(search_path)} 2>/dev/null'
                     )
                 else:
-                    result = subprocess.run(
-                        f'grep -rl "{action.pattern}" {search_path} 2>/dev/null',
-                        shell=True, capture_output=True, text=True, timeout=30, cwd=working_dir
+                    cmd_str = (
+                        f'grep -rl -E {shlex.quote(pattern)} {shlex.quote(search_path)} 2>/dev/null'
                     )
+                result = subprocess.run(
+                    cmd_str, shell=True, capture_output=True, text=True, timeout=30, cwd=working_dir
+                )
                 if result.stdout.strip():
                     files = [f.strip() for f in result.stdout.strip().split('\n') if f.strip()]
-            except (subprocess.TimeoutExpired, Exception):
-                pass
+
+                # Sort by modification time (newest first) since grep doesn't sort
+                try:
+                    files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
+                except (OSError, ValueError):
+                    pass
+
+            except subprocess.TimeoutExpired:
+                return ErrorObservation("grep_files timed out after 30 seconds")
+            except Exception as e:
+                return ErrorObservation(f"grep_files failed: {str(e)}")
 
         if not files:
             return CmdOutputObservation(
                 content="No matches found.",
                 command_id=-1,
-                command=f"codex_grep_files {action.pattern}",
+                command=f"codex_grep_files {pattern}",
             )
 
-        # Sort by modification time (newest first)
-        try:
-            files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
-        except (OSError, ValueError):
-            pass
-
-        # Apply limit
+        # Apply limit (rg results are already sorted by mtime)
         truncated = len(files) > limit
         if truncated:
             files = files[:limit]
@@ -1522,7 +1564,7 @@ class ActionExecutor:
         return CmdOutputObservation(
             content=output,
             command_id=-1,
-            command=f"codex_grep_files {action.pattern}",
+            command=f"codex_grep_files {pattern}",
         )
 
     async def codex_apply_patch(self, action: CodexApplyPatchAction) -> Observation:
