@@ -93,3 +93,9 @@ class ObservationType(str, Enum):
     TODO_WRITE = 'todo_write'
     """Result of updating the todo list."""
 
+    # Codex-style observations
+    CODEX_APPLY_PATCH = 'codex_apply_patch'
+    """Result of applying a Codex-format patch to files."""
+
+    CODEX_UPDATE_PLAN = 'codex_update_plan'
+    """Result of updating the task plan."""

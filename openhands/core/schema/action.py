@@ -132,3 +132,18 @@ class ActionType(str, Enum):
     TODO_WRITE = 'todo_write'
     """Creates or updates tasks in the todo list."""
 
+    # Codex-style actions
+    CODEX_READ_FILE = 'codex_read_file'
+    """Reads a file with 1-indexed line numbers, supporting slice and indentation-aware block modes."""
+
+    CODEX_LIST_DIR = 'codex_list_dir'
+    """Lists entries in a directory with 1-indexed entry numbers and type labels."""
+
+    CODEX_GREP_FILES = 'codex_grep_files'
+    """Finds files whose contents match a pattern, listed by modification time."""
+
+    CODEX_APPLY_PATCH = 'codex_apply_patch'
+    """Applies a Codex-format freeform patch to files."""
+
+    CODEX_UPDATE_PLAN = 'codex_update_plan'
+    """Updates the task plan with steps and statuses."""

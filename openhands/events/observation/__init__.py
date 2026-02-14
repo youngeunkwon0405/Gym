@@ -32,6 +32,10 @@ from openhands.events.observation.opencode import (
     TodoReadObservation,
     TodoWriteObservation,
 )
+from openhands.events.observation.codex import (
+    CodexApplyPatchObservation,
+    CodexUpdatePlanObservation,
+)
 from openhands.events.observation.reject import UserRejectObservation
 from openhands.events.observation.success import SuccessObservation
 from openhands.events.observation.task_tracking import TaskTrackingObservation
@@ -64,4 +68,7 @@ __all__ = [
     'ApplyPatchObservation',
     'TodoReadObservation',
     'TodoWriteObservation',
+    # Codex-style observations
+    'CodexApplyPatchObservation',
+    'CodexUpdatePlanObservation',
 ]

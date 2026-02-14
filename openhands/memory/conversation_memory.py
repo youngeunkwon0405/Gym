@@ -32,6 +32,13 @@ from openhands.events.action.opencode import (
     TodoReadAction,
     TodoWriteAction,
 )
+from openhands.events.action.codex import (
+    CodexApplyPatchAction,
+    CodexGrepFilesAction,
+    CodexListDirAction,
+    CodexReadFileAction,
+    CodexUpdatePlanAction,
+)
 from openhands.events.action.message import SystemMessageAction
 from openhands.events.event import Event, RecallType
 from openhands.events.observation import (
@@ -52,6 +59,10 @@ from openhands.events.observation import (
     TodoReadObservation,
     TodoWriteObservation,
     UserRejectObservation,
+)
+from openhands.events.observation.codex import (
+    CodexApplyPatchObservation,
+    CodexUpdatePlanObservation,
 )
 from openhands.events.observation.agent import (
     MicroagentKnowledge,
@@ -258,6 +269,12 @@ class ConversationMemory:
                 ApplyPatchAction,
                 TodoReadAction,
                 TodoWriteAction,
+                # Codex-style actions
+                CodexReadFileAction,
+                CodexListDirAction,
+                CodexGrepFilesAction,
+                CodexApplyPatchAction,
+                CodexUpdatePlanAction,
             ),
         ) or (isinstance(action, CmdRunAction) and action.source == 'agent'):
             tool_metadata = action.tool_call_metadata
@@ -596,6 +613,12 @@ class ConversationMemory:
             text = truncate_content(obs.content, max_message_chars)
             message = Message(role='user', content=[TextContent(text=text)])
         elif isinstance(obs, ApplyPatchObservation):
+            text = truncate_content(obs.content, max_message_chars)
+            message = Message(role='user', content=[TextContent(text=text)])
+        elif isinstance(obs, CodexApplyPatchObservation):
+            text = truncate_content(obs.content, max_message_chars)
+            message = Message(role='user', content=[TextContent(text=text)])
+        elif isinstance(obs, CodexUpdatePlanObservation):
             text = truncate_content(obs.content, max_message_chars)
             message = Message(role='user', content=[TextContent(text=text)])
         elif isinstance(obs, LoopDetectionObservation):

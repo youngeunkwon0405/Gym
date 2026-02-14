@@ -63,6 +63,13 @@ from openhands.events.action import (
     TodoReadAction,
     TodoWriteAction,
 )
+from openhands.events.action.codex import (
+    CodexApplyPatchAction,
+    CodexGrepFilesAction,
+    CodexListDirAction,
+    CodexReadFileAction,
+    CodexUpdatePlanAction,
+)
 from openhands.events.event import FileEditSource, FileReadSource
 from openhands.events.observation import (
     CmdOutputObservation,
@@ -79,6 +86,10 @@ from openhands.events.observation import (
 from openhands.events.observation.opencode import (
     ApplyPatchObservation,
     QuestionObservation,
+)
+from openhands.events.observation.codex import (
+    CodexApplyPatchObservation,
+    CodexUpdatePlanObservation,
 )
 from openhands.events.serialization import event_from_dict, event_to_dict
 from openhands.runtime.browser import browse
@@ -1183,6 +1194,666 @@ class ActionExecutor:
         except Exception as e:
             logger.exception(f'Error updating todos: {e}')
             return ErrorObservation(f'Failed to update todos: {str(e)}')
+
+    # =========================================================================
+    # Codex-style action handlers
+    # =========================================================================
+
+    async def codex_read_file(self, action: CodexReadFileAction) -> Observation:
+        """Execute Codex-style file read with L{number}: format and 1-indexed lines."""
+        assert self.bash_session is not None
+        working_dir = self.bash_session.cwd
+        filepath = self._resolve_path(action.file_path, working_dir)
+
+        # Check if file exists
+        if not os.path.exists(filepath):
+            # Try to find suggestions
+            directory = os.path.dirname(filepath) or '.'
+            basename = os.path.basename(filepath)
+
+            if os.path.isdir(directory):
+                try:
+                    entries = os.listdir(directory)
+                    suggestions = [
+                        os.path.join(directory, entry)
+                        for entry in entries
+                        if basename.lower() in entry.lower() or entry.lower() in basename.lower()
+                    ][:3]
+
+                    if suggestions:
+                        return ErrorObservation(
+                            f"File not found: {filepath}\n\nDid you mean one of these?\n"
+                            + "\n".join(suggestions)
+                        )
+                except OSError:
+                    pass
+
+            return ErrorObservation(f"File not found: {filepath}")
+
+        # Check if directory
+        if os.path.isdir(filepath):
+            return ErrorObservation(f"Path is a directory: {filepath}. You can only read files")
+
+        # Check binary by content
+        try:
+            with open(filepath, 'rb') as f:
+                chunk = f.read(4096)
+                if b'\x00' in chunk:
+                    return ErrorObservation(f"Cannot read binary file: {filepath}")
+                if chunk:
+                    non_printable = sum(1 for b in chunk if b < 9 or (b > 13 and b < 32))
+                    if non_printable / len(chunk) > 0.3:
+                        return ErrorObservation(f"Cannot read binary file: {filepath}")
+        except Exception:
+            pass
+
+        # Read file
+        try:
+            with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+                lines = f.read().split('\n')
+        except Exception as e:
+            return ErrorObservation(f"Error reading file: {e}")
+
+        total_lines = len(lines)
+
+        # Handle indentation mode
+        if action.mode == 'indentation' and action.indentation:
+            return self._codex_read_file_indentation(
+                lines, total_lines, filepath, action
+            )
+
+        # Slice mode (default) - 1-indexed offset
+        offset = max(action.offset, 1)  # Ensure >= 1
+        limit = action.limit
+        start_idx = offset - 1  # Convert to 0-indexed
+
+        raw = []
+        for i in range(start_idx, min(total_lines, start_idx + limit)):
+            raw.append(lines[i])
+
+        # Format with L{number}: (Codex style, 1-indexed)
+        content_lines = [
+            f"L{i + offset}: {line}"
+            for i, line in enumerate(raw)
+        ]
+
+        last_read_line = offset + len(raw) - 1
+        has_more = total_lines > (start_idx + len(raw))
+
+        output = '\n'.join(content_lines)
+        if has_more:
+            output += f'\n\n(File has {total_lines} lines total. Use offset to read more.)'
+        else:
+            output += f'\n\n(End of file. Total lines: {total_lines})'
+
+        return CmdOutputObservation(
+            content=output,
+            command_id=-1,
+            command=f"codex_read_file {filepath}",
+        )
+
+    def _codex_read_file_indentation(
+        self, lines: list[str], total_lines: int, filepath: str,
+        action: CodexReadFileAction,
+    ) -> Observation:
+        """Handle indentation-aware block reading mode."""
+        indent_args = action.indentation
+        anchor = indent_args.get('anchor_line', action.offset)
+        anchor_idx = max(anchor - 1, 0)  # Convert to 0-indexed
+        max_levels = indent_args.get('max_levels', 0)
+        include_siblings = indent_args.get('include_siblings', False)
+        include_header = indent_args.get('include_header', True)
+        max_lines = indent_args.get('max_lines', action.limit)
+
+        if anchor_idx >= total_lines:
+            return ErrorObservation(
+                f"Anchor line {anchor} is beyond end of file ({total_lines} lines)"
+            )
+
+        # Get the indentation level of the anchor line
+        anchor_line = lines[anchor_idx]
+        anchor_indent = len(anchor_line) - len(anchor_line.lstrip())
+
+        # Find the block boundaries
+        # Walk upward to find parent blocks based on max_levels
+        start_idx = anchor_idx
+        current_indent = anchor_indent
+        levels_found = 0
+
+        for i in range(anchor_idx - 1, -1, -1):
+            line = lines[i]
+            stripped = line.lstrip()
+            if not stripped:  # Skip empty lines
+                continue
+            line_indent = len(line) - len(stripped)
+            if line_indent < current_indent:
+                levels_found += 1
+                current_indent = line_indent
+                start_idx = i
+                if max_levels > 0 and levels_found >= max_levels:
+                    break
+
+        # Include header (doc comments/attributes above the block)
+        if include_header and start_idx > 0:
+            for i in range(start_idx - 1, -1, -1):
+                line = lines[i].strip()
+                if line.startswith('#') or line.startswith('//') or line.startswith('/*') or \
+                   line.startswith('*') or line.startswith('"""') or line.startswith("'''") or \
+                   line.startswith('@') or not line:
+                    start_idx = i
+                else:
+                    break
+
+        # Walk downward to find end of block
+        end_idx = anchor_idx
+        for i in range(anchor_idx + 1, total_lines):
+            line = lines[i]
+            stripped = line.lstrip()
+            if not stripped:  # Include empty lines within block
+                end_idx = i
+                continue
+            line_indent = len(line) - len(stripped)
+            if line_indent <= anchor_indent and stripped:
+                if include_siblings and line_indent == anchor_indent:
+                    end_idx = i
+                    continue
+                break
+            end_idx = i
+
+        # Apply max_lines cap
+        if max_lines and (end_idx - start_idx + 1) > max_lines:
+            end_idx = start_idx + max_lines - 1
+
+        # Collect lines
+        raw = lines[start_idx:end_idx + 1]
+
+        # Format with L{number}: (1-indexed)
+        content_lines = [
+            f"L{start_idx + 1 + i}: {line}"
+            for i, line in enumerate(raw)
+        ]
+
+        output = '\n'.join(content_lines)
+        output += f'\n\n(Showing lines {start_idx + 1}-{end_idx + 1} of {total_lines} total)'
+
+        return CmdOutputObservation(
+            content=output,
+            command_id=-1,
+            command=f"codex_read_file {filepath} (indentation mode)",
+        )
+
+    async def codex_list_dir(self, action: CodexListDirAction) -> Observation:
+        """Execute Codex-style directory listing with numbered entries and type labels."""
+        assert self.bash_session is not None
+        working_dir = self.bash_session.cwd
+        dir_path = self._resolve_path(action.dir_path, working_dir)
+
+        if not os.path.exists(dir_path):
+            return ErrorObservation(f"Directory not found: {dir_path}")
+
+        if not os.path.isdir(dir_path):
+            return ErrorObservation(f"Path is not a directory: {dir_path}")
+
+        # Collect entries recursively up to depth
+        entries: list[tuple[str, str]] = []  # (relative_path, type_label)
+
+        def _collect_entries(current_path: str, rel_prefix: str, current_depth: int) -> None:
+            if current_depth > action.depth:
+                return
+            try:
+                items = sorted(os.listdir(current_path))
+            except PermissionError:
+                return
+
+            for item in items:
+                # Skip hidden files and common ignore patterns
+                if item.startswith('.'):
+                    continue
+
+                full_path = os.path.join(current_path, item)
+                rel_path = os.path.join(rel_prefix, item) if rel_prefix else item
+
+                if os.path.isdir(full_path):
+                    entries.append((rel_path, 'dir'))
+                    if current_depth < action.depth:
+                        _collect_entries(full_path, rel_path, current_depth + 1)
+                else:
+                    entries.append((rel_path, 'file'))
+
+        _collect_entries(dir_path, '', 1)
+
+        # Apply offset and limit (1-indexed offset)
+        offset = max(action.offset, 1)
+        start_idx = offset - 1
+        end_idx = start_idx + action.limit
+
+        paginated = entries[start_idx:end_idx]
+
+        if not paginated:
+            output = "No entries found."
+        else:
+            # Format as numbered entries with type labels
+            output_lines = []
+            for i, (rel_path, type_label) in enumerate(paginated):
+                entry_num = start_idx + i + 1
+                output_lines.append(f"{entry_num}. [{type_label}] {rel_path}")
+            output = '\n'.join(output_lines)
+
+            if end_idx < len(entries):
+                output += f'\n\n(Showing {len(paginated)} of {len(entries)} entries. Use offset to see more.)'
+
+        return CmdOutputObservation(
+            content=output,
+            command_id=-1,
+            command=f"codex_list_dir {dir_path}",
+        )
+
+    async def codex_grep_files(self, action: CodexGrepFilesAction) -> Observation:
+        """Execute Codex-style grep: find files matching pattern, return paths sorted by mtime."""
+        assert self.bash_session is not None
+        working_dir = self.bash_session.cwd
+        search_path = self._resolve_path(action.path, working_dir) if action.path else working_dir
+
+        import subprocess
+
+        files: list[str] = []
+        limit = action.limit if action.limit > 0 else 100
+
+        # Ensure include pattern matches recursively
+        include = action.include
+        if include and not include.startswith('**/'):
+            include = '**/' + include
+
+        # Try ripgrep first (respects .gitignore, fast)
+        try:
+            cmd = ['rg', '-l', action.pattern, search_path]
+            if include:
+                cmd = ['rg', '-l', '-g', include, action.pattern, search_path]
+
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=30, cwd=working_dir
+            )
+            if result.stdout.strip():
+                files = [f.strip() for f in result.stdout.strip().split('\n') if f.strip()]
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+
+        # Fallback to grep
+        if not files:
+            try:
+                if action.include:
+                    result = subprocess.run(
+                        f'find {search_path} -type f -name "{action.include}" '
+                        f'-exec grep -l "{action.pattern}" {{}} \\; 2>/dev/null',
+                        shell=True, capture_output=True, text=True, timeout=30, cwd=working_dir
+                    )
+                else:
+                    result = subprocess.run(
+                        f'grep -rl "{action.pattern}" {search_path} 2>/dev/null',
+                        shell=True, capture_output=True, text=True, timeout=30, cwd=working_dir
+                    )
+                if result.stdout.strip():
+                    files = [f.strip() for f in result.stdout.strip().split('\n') if f.strip()]
+            except (subprocess.TimeoutExpired, Exception):
+                pass
+
+        if not files:
+            return CmdOutputObservation(
+                content="No matches found.",
+                command_id=-1,
+                command=f"codex_grep_files {action.pattern}",
+            )
+
+        # Sort by modification time (newest first)
+        try:
+            files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
+        except (OSError, ValueError):
+            pass
+
+        # Apply limit
+        truncated = len(files) > limit
+        if truncated:
+            files = files[:limit]
+
+        output = '\n'.join(files)
+        if truncated:
+            output += f'\n\n(Results truncated at {limit} files.)'
+
+        return CmdOutputObservation(
+            content=output,
+            command_id=-1,
+            command=f"codex_grep_files {action.pattern}",
+        )
+
+    async def codex_apply_patch(self, action: CodexApplyPatchAction) -> Observation:
+        """Apply a Codex-format patch to files."""
+        assert self.bash_session is not None
+        patch_text = action.patch
+
+        if not patch_text.strip():
+            return ErrorObservation("Empty patch provided")
+
+        # Parse the Codex patch format and convert to unified diff for git apply
+        # The Codex patch format uses:
+        # *** Begin Patch / *** End Patch delimiters
+        # --- a/path and +++ b/path headers
+        # @@ context @@ anchors
+        # +/- lines for additions/removals
+        # space-prefixed context lines
+
+        try:
+            import tempfile
+
+            # Try to apply directly with git apply first
+            # Strip the *** Begin Patch / *** End Patch wrappers if present
+            clean_patch = patch_text
+            if '*** Begin Patch' in clean_patch:
+                # Extract content between delimiters
+                parts = clean_patch.split('*** Begin Patch')
+                if len(parts) > 1:
+                    clean_patch = parts[1]
+                if '*** End Patch' in clean_patch:
+                    clean_patch = clean_patch.split('*** End Patch')[0]
+                clean_patch = clean_patch.strip()
+
+            # Handle file creation (--- /dev/null)
+            # Handle file deletion (+++ /dev/null)
+            # These are standard unified diff operations
+
+            with tempfile.NamedTemporaryFile(
+                mode='w', suffix='.patch', delete=False
+            ) as f:
+                f.write(clean_patch + '\n')
+                patch_file = f.name
+
+            try:
+                # Try git apply first
+                result = subprocess.run(
+                    ['git', 'apply', '--verbose', patch_file],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    cwd=self.bash_session.cwd,
+                )
+
+                if result.returncode == 0:
+                    output = result.stdout.strip() or 'Patch applied successfully.'
+                    files_changed = [
+                        line.split(':')[0].strip()
+                        for line in result.stderr.strip().split('\n')
+                        if line.strip()
+                    ]
+                    return CodexApplyPatchObservation(
+                        content=output,
+                        files_changed=files_changed,
+                        success=True,
+                    )
+
+                # If git apply fails, try applying manually
+                # Parse the patch and apply line by line
+                files_changed = []
+                error_msg = result.stderr.strip() or result.stdout.strip()
+
+                # Try with --3way flag
+                result = subprocess.run(
+                    ['git', 'apply', '--3way', '--verbose', patch_file],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    cwd=self.bash_session.cwd,
+                )
+
+                if result.returncode == 0:
+                    output = result.stdout.strip() or 'Patch applied successfully (3-way merge).'
+                    files_changed = [
+                        line.split(':')[0].strip()
+                        for line in result.stderr.strip().split('\n')
+                        if line.strip()
+                    ]
+                    return CodexApplyPatchObservation(
+                        content=output,
+                        files_changed=files_changed,
+                        success=True,
+                    )
+
+                # Fall back to manual patch application
+                return self._codex_apply_patch_manual(clean_patch)
+
+            finally:
+                os.unlink(patch_file)
+
+        except Exception as e:
+            logger.exception(f'Error applying Codex patch: {e}')
+            return ErrorObservation(f'Failed to apply patch: {str(e)}')
+
+    def _codex_apply_patch_manual(self, patch_text: str) -> Observation:
+        """Manually apply a Codex-format patch when git apply fails."""
+        files_changed = []
+        current_file = None
+        current_hunks: list[dict] = []
+        errors = []
+
+        lines = patch_text.split('\n')
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+
+            # Detect file header
+            if line.startswith('--- '):
+                old_path = line[4:].strip()
+                if old_path.startswith('a/'):
+                    old_path = old_path[2:]
+                elif old_path == '/dev/null':
+                    old_path = None
+
+                i += 1
+                if i < len(lines) and lines[i].startswith('+++ '):
+                    new_path = lines[i][4:].strip()
+                    if new_path.startswith('b/'):
+                        new_path = new_path[2:]
+                    elif new_path == '/dev/null':
+                        new_path = None
+
+                    # Apply previous file's hunks
+                    if current_file and current_hunks:
+                        err = self._apply_hunks_to_file(current_file, current_hunks)
+                        if err:
+                            errors.append(err)
+                        else:
+                            files_changed.append(current_file)
+
+                    current_hunks = []
+
+                    if old_path is None and new_path:
+                        # Create new file
+                        current_file = new_path
+                        content_lines = []
+                        i += 1
+                        while i < len(lines):
+                            if lines[i].startswith('--- ') or lines[i].startswith('*** '):
+                                break
+                            if lines[i].startswith('+'):
+                                content_lines.append(lines[i][1:])
+                            i += 1
+                        # Write the new file
+                        full_path = os.path.join(self.bash_session.cwd, new_path)
+                        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+                        with open(full_path, 'w', encoding='utf-8') as f:
+                            f.write('\n'.join(content_lines))
+                        files_changed.append(new_path)
+                        current_file = None
+                        continue
+                    elif new_path is None and old_path:
+                        # Delete file
+                        full_path = os.path.join(self.bash_session.cwd, old_path)
+                        if os.path.exists(full_path):
+                            os.unlink(full_path)
+                            files_changed.append(old_path)
+                        current_file = None
+                        i += 1
+                        continue
+                    else:
+                        current_file = new_path
+                    i += 1
+                    continue
+
+            # Detect hunk header
+            if line.startswith('@@ ') and current_file:
+                # Extract anchor context
+                anchor = line.strip('@').strip()
+                current_hunks.append({
+                    'anchor': anchor,
+                    'removes': [],
+                    'adds': [],
+                    'context_before': [],
+                    'context_after': [],
+                })
+                i += 1
+                continue
+
+            # Collect hunk content
+            if current_hunks:
+                if line.startswith('-'):
+                    current_hunks[-1]['removes'].append(line[1:])
+                elif line.startswith('+'):
+                    current_hunks[-1]['adds'].append(line[1:])
+                elif line.startswith(' '):
+                    if not current_hunks[-1]['removes'] and not current_hunks[-1]['adds']:
+                        current_hunks[-1]['context_before'].append(line[1:])
+                    else:
+                        current_hunks[-1]['context_after'].append(line[1:])
+
+            i += 1
+
+        # Apply remaining file's hunks
+        if current_file and current_hunks:
+            err = self._apply_hunks_to_file(current_file, current_hunks)
+            if err:
+                errors.append(err)
+            else:
+                files_changed.append(current_file)
+
+        if errors:
+            return CodexApplyPatchObservation(
+                content='Patch applied with errors:\n' + '\n'.join(errors),
+                files_changed=files_changed,
+                success=len(files_changed) > 0,
+            )
+
+        if not files_changed:
+            return CodexApplyPatchObservation(
+                content='No files were changed by the patch.',
+                files_changed=[],
+                success=False,
+            )
+
+        return CodexApplyPatchObservation(
+            content=f'Patch applied successfully to {len(files_changed)} file(s).',
+            files_changed=files_changed,
+            success=True,
+        )
+
+    def _apply_hunks_to_file(self, filepath: str, hunks: list[dict]) -> str | None:
+        """Apply hunks to a file. Returns error string or None on success."""
+        full_path = os.path.join(self.bash_session.cwd, filepath)
+        if not os.path.exists(full_path):
+            return f"File not found: {filepath}"
+
+        try:
+            with open(full_path, 'r', encoding='utf-8') as f:
+                file_lines = f.read().split('\n')
+        except Exception as e:
+            return f"Error reading {filepath}: {e}"
+
+        # Apply each hunk
+        for hunk in hunks:
+            anchor = hunk['anchor']
+            removes = hunk['removes']
+            adds = hunk['adds']
+
+            # Find anchor line in file
+            anchor_idx = None
+            for idx, line in enumerate(file_lines):
+                if line.strip() == anchor.strip():
+                    anchor_idx = idx
+                    break
+
+            if anchor_idx is None:
+                return f"Could not find anchor '{anchor}' in {filepath}"
+
+            # Find the position to apply changes (after context lines)
+            context_before = hunk['context_before']
+            apply_start = anchor_idx
+            if context_before:
+                # Match context lines to find exact position
+                for idx in range(anchor_idx, min(anchor_idx + 20, len(file_lines))):
+                    if idx + len(context_before) <= len(file_lines):
+                        match = all(
+                            file_lines[idx + j].strip() == ctx.strip()
+                            for j, ctx in enumerate(context_before)
+                        )
+                        if match:
+                            apply_start = idx + len(context_before)
+                            break
+            else:
+                apply_start = anchor_idx + 1
+
+            # Remove lines
+            if removes:
+                for _ in removes:
+                    if apply_start < len(file_lines):
+                        file_lines.pop(apply_start)
+
+            # Add lines
+            for j, add_line in enumerate(adds):
+                file_lines.insert(apply_start + j, add_line)
+
+        # Write back
+        try:
+            with open(full_path, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(file_lines))
+        except Exception as e:
+            return f"Error writing {filepath}: {e}"
+
+        return None
+
+    async def codex_update_plan(self, action: CodexUpdatePlanAction) -> Observation:
+        """Update the task plan."""
+        try:
+            plan_items = action.plan
+            if not isinstance(plan_items, list):
+                return ErrorObservation('plan must be a list of plan items')
+
+            # Validate plan items
+            in_progress_count = 0
+            for item in plan_items:
+                if not isinstance(item, dict):
+                    return ErrorObservation('Each plan item must be a dict with step and status')
+                if 'step' not in item or 'status' not in item:
+                    return ErrorObservation('Each plan item must have step and status fields')
+                if item['status'] not in ('pending', 'in_progress', 'completed'):
+                    return ErrorObservation(
+                        f"Invalid status '{item['status']}'. Must be: pending, in_progress, completed"
+                    )
+                if item['status'] == 'in_progress':
+                    in_progress_count += 1
+
+            if in_progress_count > 1:
+                return ErrorObservation('At most one step can be in_progress at a time')
+
+            # Store the plan (reuse _todos storage for plan items)
+            if not hasattr(self, '_plan'):
+                self._plan: list[dict] = []
+            self._plan = list(plan_items)
+
+            return CodexUpdatePlanObservation(
+                content='Plan updated',
+                plan=list(self._plan),
+                success=True,
+            )
+        except Exception as e:
+            logger.exception(f'Error updating plan: {e}')
+            return ErrorObservation(f'Failed to update plan: {str(e)}')
 
     async def browse(self, action: BrowseURLAction) -> Observation:
         if self.browser is None:

@@ -38,6 +38,13 @@ from openhands.events.action.opencode import (
     TodoReadAction,
     TodoWriteAction,
 )
+from openhands.events.action.codex import (
+    CodexApplyPatchAction,
+    CodexGrepFilesAction,
+    CodexListDirAction,
+    CodexReadFileAction,
+    CodexUpdatePlanAction,
+)
 
 actions = (
     NullAction,
@@ -71,6 +78,12 @@ actions = (
     ApplyPatchAction,
     TodoReadAction,
     TodoWriteAction,
+    # Codex-style actions
+    CodexReadFileAction,
+    CodexListDirAction,
+    CodexGrepFilesAction,
+    CodexApplyPatchAction,
+    CodexUpdatePlanAction,
 )
 
 ACTION_TYPE_TO_CLASS = {action_class.action: action_class for action_class in actions}  # type: ignore[attr-defined]

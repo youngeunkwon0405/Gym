@@ -42,6 +42,13 @@ from openhands.events.action.opencode import (
     TodoReadAction,
     TodoWriteAction,
 )
+from openhands.events.action.codex import (
+    CodexApplyPatchAction,
+    CodexGrepFilesAction,
+    CodexListDirAction,
+    CodexReadFileAction,
+    CodexUpdatePlanAction,
+)
 from openhands.events.action.action import Action
 from openhands.events.action.files import FileEditSource
 from openhands.events.action.mcp import MCPAction
@@ -410,6 +417,25 @@ class ActionExecutionClient(Runtime):
         return self.send_action_for_execution(action)
 
     def todo_write(self, action: TodoWriteAction) -> Observation:
+        return self.send_action_for_execution(action)
+
+    # =========================================================================
+    # Codex-style action handlers
+    # =========================================================================
+
+    def codex_read_file(self, action: CodexReadFileAction) -> Observation:
+        return self.send_action_for_execution(action)
+
+    def codex_list_dir(self, action: CodexListDirAction) -> Observation:
+        return self.send_action_for_execution(action)
+
+    def codex_grep_files(self, action: CodexGrepFilesAction) -> Observation:
+        return self.send_action_for_execution(action)
+
+    def codex_apply_patch(self, action: CodexApplyPatchAction) -> Observation:
+        return self.send_action_for_execution(action)
+
+    def codex_update_plan(self, action: CodexUpdatePlanAction) -> Observation:
         return self.send_action_for_execution(action)
 
     def get_mcp_config(

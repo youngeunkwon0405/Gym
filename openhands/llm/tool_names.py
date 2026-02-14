@@ -15,3 +15,11 @@ LIST_DIR_TOOL_NAME = "list_dir"
 READ_TOOL_NAME = "read"
 WRITE_TOOL_NAME = "write"
 EDIT_TOOL_NAME = "edit"
+
+# Codex-inspired tools
+CODEX_SHELL_COMMAND_TOOL_NAME = "shell_command"
+CODEX_READ_FILE_TOOL_NAME = "read_file"
+CODEX_LIST_DIR_TOOL_NAME = "list_dir"
+CODEX_GREP_FILES_TOOL_NAME = "grep_files"
+CODEX_APPLY_PATCH_TOOL_NAME = "apply_patch"
+CODEX_UPDATE_PLAN_TOOL_NAME = "update_plan"
