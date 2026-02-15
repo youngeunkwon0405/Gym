@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import APIKeyHeader
 # Use OpenCodeEditor with fuzzy matching instead of default OHEditor
 try:
-    from openhands.agenthub.codeact_agent.tools.opencode_editor import OpenCodeEditor as OHEditor
+    from openhands.agenthub.opencode_agent.opencode_editor import OpenCodeEditor as OHEditor
 except ImportError:
     # Fallback to standard OHEditor if OpenCodeEditor not available (e.g., in sandbox)
     from openhands_aci.editor.editor import OHEditor
@@ -846,6 +846,12 @@ class ActionExecutor:
         working_dir = self.bash_session.cwd
         search_path = self._resolve_path(action.path, working_dir)
 
+        # Validate path exists
+        if not os.path.exists(search_path):
+            return ErrorObservation(
+                f"Path does not exist: {search_path}"
+            )
+
         # Auto-prepend **/ to patterns without a path separator so that
         # simple patterns like "*.py" search recursively instead of only
         # matching at the root of the search path.
@@ -856,6 +862,7 @@ class ActionExecutor:
         files = []
         truncated = False
         limit = 100
+        rg_available = False
 
         # Try ripgrep first (fast, respects .gitignore)
         # Note: avoid --sortr flag as it requires ripgrep >= 13.0.0
@@ -864,13 +871,23 @@ class ActionExecutor:
                 ['rg', '--files', '-g', pattern, search_path],
                 capture_output=True, text=True, timeout=30, cwd=working_dir
             )
+            rg_available = True
+
             if result.returncode == 0 and result.stdout.strip():
                 files = [f.strip() for f in result.stdout.strip().split('\n') if f.strip()]
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            pass
+            elif result.returncode == 1:
+                # Exit code 1 = no matches found (not an error)
+                files = []
+            elif result.returncode not in (0, 1):
+                logger.warning(f"rg --files failed: {result.stderr.strip()}")
+                rg_available = False
+        except FileNotFoundError:
+            rg_available = False
+        except subprocess.TimeoutExpired:
+            return ErrorObservation("glob search timed out after 30 seconds")
 
         # Fallback to Python's glob module (handles ** patterns natively)
-        if not files:
+        if not rg_available:
             try:
                 full_pattern = os.path.join(search_path, pattern)
                 files = [
@@ -916,10 +933,18 @@ class ActionExecutor:
         working_dir = self.bash_session.cwd
         search_path = self._resolve_path(action.path, working_dir)
 
+        import shlex
         import subprocess
+
+        # Validate path exists
+        if not os.path.exists(search_path):
+            return ErrorObservation(
+                f"Path does not exist: {search_path}"
+            )
 
         raw_lines: list[str] = []
         limit = 100
+        rg_available = False
 
         # Ensure include pattern matches recursively (e.g., "*.py" -> "**/*.py")
         include = action.include
@@ -928,37 +953,56 @@ class ActionExecutor:
 
         # Try ripgrep first (respects .gitignore)
         try:
-            cmd = ['rg', '-n', action.pattern, search_path]
+            cmd = ['rg', '-n', '--regexp', action.pattern, search_path]
             if include:
-                cmd = ['rg', '-n', '-g', include, action.pattern, search_path]
+                cmd = ['rg', '-n', '--regexp', action.pattern, '-g', include, search_path]
 
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=30, cwd=working_dir
             )
-            if result.stdout.strip():
+            rg_available = True
+
+            if result.returncode == 0 and result.stdout.strip():
                 raw_lines = [l for l in result.stdout.strip().split('\n') if l.strip()]
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            pass
+            elif result.returncode == 1:
+                # Exit code 1 = no matches found (not an error)
+                raw_lines = []
+            elif result.returncode not in (0, 1):
+                logger.warning(f"rg failed: {result.stderr.strip()}")
+                rg_available = False
+        except FileNotFoundError:
+            rg_available = False
+        except subprocess.TimeoutExpired:
+            return ErrorObservation("grep search timed out after 30 seconds")
 
         # Fallback to grep -E (extended regex for | alternation support)
-        if not raw_lines:
+        if not rg_available:
             try:
-                if action.include:
-                    # Use find + grep -E for file filtering with extended regex
-                    result = subprocess.run(
-                        f'find {search_path} -type f -name "{action.include}" '
-                        f'-exec grep -EHn "{action.pattern}" {{}} \\; 2>/dev/null',
-                        shell=True, capture_output=True, text=True, timeout=30, cwd=working_dir
+                if include:
+                    # Strip **/ prefix for grep --include (doesn't understand **/*)
+                    grep_include = include
+                    if grep_include.startswith('**/'):
+                        grep_include = grep_include[3:]
+
+                    cmd_str = (
+                        f'grep -ErHn --include={shlex.quote(grep_include)} '
+                        f'{shlex.quote(action.pattern)} {shlex.quote(search_path)} 2>/dev/null'
                     )
                 else:
-                    result = subprocess.run(
-                        f'grep -Ern "{action.pattern}" {search_path} 2>/dev/null',
-                        shell=True, capture_output=True, text=True, timeout=30, cwd=working_dir
+                    cmd_str = (
+                        f'grep -Ern {shlex.quote(action.pattern)} '
+                        f'{shlex.quote(search_path)} 2>/dev/null'
                     )
+                result = subprocess.run(
+                    cmd_str,
+                    shell=True, capture_output=True, text=True, timeout=30, cwd=working_dir
+                )
                 if result.stdout.strip():
                     raw_lines = [l for l in result.stdout.strip().split('\n') if l.strip()]
-            except (subprocess.TimeoutExpired, Exception):
-                pass
+            except subprocess.TimeoutExpired:
+                return ErrorObservation("grep search timed out after 30 seconds")
+            except Exception as e:
+                logger.warning(f"grep fallback failed: {e}")
 
         if not raw_lines:
             output = "No matches found"

@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from binaryornot.check import is_binary
 # Use OpenCodeEditor with fuzzy matching instead of default OHEditor
 try:
-    from openhands.agenthub.codeact_agent.tools.opencode_editor import OpenCodeEditor as OHEditor
+    from openhands.agenthub.opencode_agent.opencode_editor import OpenCodeEditor as OHEditor
 except ImportError:
     # Fallback to standard OHEditor if OpenCodeEditor not available
     from openhands_aci.editor.editor import OHEditor

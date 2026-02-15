@@ -9,12 +9,12 @@ file_editor initialization:
 1. In openhands/runtime/action_execution_server.py, change:
    from openhands_aci.editor import OHEditor
    to:
-   from openhands.agenthub.codeact_agent.tools.opencode_editor import OpenCodeEditor as OHEditor
+   from openhands.agenthub.opencode_agent.opencode_editor import OpenCodeEditor as OHEditor
 
 2. In openhands/runtime/impl/cli/cli_runtime.py, change:
    from openhands_aci.editor import OHEditor
    to:
-   from openhands.agenthub.codeact_agent.tools.opencode_editor import OpenCodeEditor as OHEditor
+   from openhands.agenthub.opencode_agent.opencode_editor import OpenCodeEditor as OHEditor
 
 This enables fuzzy matching for string replacements, making the editor more
 robust when dealing with whitespace differences, indentation variations, etc.
@@ -34,7 +34,7 @@ from openhands_aci.editor.exceptions import ToolError
 from openhands_aci.editor.config import SNIPPET_CONTEXT_WINDOW
 
 # Import the fuzzy matching functions from opencode_impl
-from openhands.agenthub.codeact_agent.tools.opencode_impl import (
+from openhands.agenthub.opencode_agent.opencode_impl import (
     simple_replacer,
     line_trimmed_replacer,
     block_anchor_replacer,
@@ -102,7 +102,7 @@ class OpenCodeEditor(OHEditor):
         # In your runtime initialization, replace:
         self.file_editor = OHEditor(...)
         # With:
-        from openhands.agenthub.codeact_agent.tools.opencode_editor import OpenCodeEditor
+        from openhands.agenthub.opencode_agent.opencode_editor import OpenCodeEditor
         self.file_editor = OpenCodeEditor(...)
     """
 
