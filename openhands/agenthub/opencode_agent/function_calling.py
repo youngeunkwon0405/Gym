@@ -282,8 +282,15 @@ def response_to_actions(
                     thought=thought if i == 0 else '',
                 )
 
+            except FunctionCallNotExistsError as e:
+                # Send error as a user message while preserving the assistant message
+                action = MessageAction(
+                    content=str(e),
+                    wait_for_response=False,
+                )
+
             # Add thought to first action
-            if i == 0 and not isinstance(action, ValidationFailureAction):
+            if i == 0 and not isinstance(action, (ValidationFailureAction, MessageAction)):
                 action = combine_thought(action, thought)
 
             # Add metadata for tool calling
