@@ -1612,294 +1612,532 @@ class ActionExecutor:
         )
 
     async def codex_apply_patch(self, action: CodexApplyPatchAction) -> Observation:
-        """Apply a Codex-format patch to files."""
+        """Apply a Codex freeform-format patch to files.
+
+        The Codex patch format uses:
+        *** Begin Patch / *** End Patch delimiters
+        *** Add File: <path>    - create new files
+        *** Delete File: <path> - delete files
+        *** Update File: <path> - modify existing files
+        *** Move to: <path>     - rename/move files (after Update File)
+        @@ <context>            - context anchors within Update File chunks
+        +/- lines for additions/removals
+        space-prefixed context lines (both old and new)
+        *** End of File         - mark end-of-file position
+        """
         assert self.bash_session is not None
         patch_text = action.patch
 
         if not patch_text.strip():
-            return ErrorObservation("Empty patch provided")
-
-        # Parse the Codex patch format and convert to unified diff for git apply
-        # The Codex patch format uses:
-        # *** Begin Patch / *** End Patch delimiters
-        # --- a/path and +++ b/path headers
-        # @@ context @@ anchors
-        # +/- lines for additions/removals
-        # space-prefixed context lines
+            return ErrorObservation('Empty patch provided.')
 
         try:
-            import tempfile
-
-            # Try to apply directly with git apply first
-            # Strip the *** Begin Patch / *** End Patch wrappers if present
-            clean_patch = patch_text
-            if '*** Begin Patch' in clean_patch:
-                # Extract content between delimiters
-                parts = clean_patch.split('*** Begin Patch')
-                if len(parts) > 1:
-                    clean_patch = parts[1]
-                if '*** End Patch' in clean_patch:
-                    clean_patch = clean_patch.split('*** End Patch')[0]
-                clean_patch = clean_patch.strip()
-
-            # Handle file creation (--- /dev/null)
-            # Handle file deletion (+++ /dev/null)
-            # These are standard unified diff operations
-
-            with tempfile.NamedTemporaryFile(
-                mode='w', suffix='.patch', delete=False
-            ) as f:
-                f.write(clean_patch + '\n')
-                patch_file = f.name
-
-            try:
-                # Try git apply first
-                result = subprocess.run(
-                    ['git', 'apply', '--verbose', patch_file],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    cwd=self.bash_session.cwd,
-                )
-
-                if result.returncode == 0:
-                    output = result.stdout.strip() or 'Patch applied successfully.'
-                    files_changed = [
-                        line.split(':')[0].strip()
-                        for line in result.stderr.strip().split('\n')
-                        if line.strip()
-                    ]
-                    return CodexApplyPatchObservation(
-                        content=output,
-                        files_changed=files_changed,
-                        success=True,
-                    )
-
-                # If git apply fails, try applying manually
-                # Parse the patch and apply line by line
-                files_changed = []
-                error_msg = result.stderr.strip() or result.stdout.strip()
-
-                # Try with --3way flag
-                result = subprocess.run(
-                    ['git', 'apply', '--3way', '--verbose', patch_file],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    cwd=self.bash_session.cwd,
-                )
-
-                if result.returncode == 0:
-                    output = result.stdout.strip() or 'Patch applied successfully (3-way merge).'
-                    files_changed = [
-                        line.split(':')[0].strip()
-                        for line in result.stderr.strip().split('\n')
-                        if line.strip()
-                    ]
-                    return CodexApplyPatchObservation(
-                        content=output,
-                        files_changed=files_changed,
-                        success=True,
-                    )
-
-                # Fall back to manual patch application
-                return self._codex_apply_patch_manual(clean_patch)
-
-            finally:
-                os.unlink(patch_file)
-
-        except Exception as e:
-            logger.exception(f'Error applying Codex patch: {e}')
-            return ErrorObservation(f'Failed to apply patch: {str(e)}')
-
-    def _codex_apply_patch_manual(self, patch_text: str) -> Observation:
-        """Manually apply a Codex-format patch when git apply fails."""
-        files_changed = []
-        current_file = None
-        current_hunks: list[dict] = []
-        errors = []
-
-        lines = patch_text.split('\n')
-        i = 0
-        while i < len(lines):
-            line = lines[i]
-
-            # Detect file header
-            if line.startswith('--- '):
-                old_path = line[4:].strip()
-                if old_path.startswith('a/'):
-                    old_path = old_path[2:]
-                elif old_path == '/dev/null':
-                    old_path = None
-
-                i += 1
-                if i < len(lines) and lines[i].startswith('+++ '):
-                    new_path = lines[i][4:].strip()
-                    if new_path.startswith('b/'):
-                        new_path = new_path[2:]
-                    elif new_path == '/dev/null':
-                        new_path = None
-
-                    # Apply previous file's hunks
-                    if current_file and current_hunks:
-                        err = self._apply_hunks_to_file(current_file, current_hunks)
-                        if err:
-                            errors.append(err)
-                        else:
-                            files_changed.append(current_file)
-
-                    current_hunks = []
-
-                    if old_path is None and new_path:
-                        # Create new file
-                        current_file = new_path
-                        content_lines = []
-                        i += 1
-                        while i < len(lines):
-                            if lines[i].startswith('--- ') or lines[i].startswith('*** '):
-                                break
-                            if lines[i].startswith('+'):
-                                content_lines.append(lines[i][1:])
-                            i += 1
-                        # Write the new file
-                        full_path = os.path.join(self.bash_session.cwd, new_path)
-                        os.makedirs(os.path.dirname(full_path), exist_ok=True)
-                        with open(full_path, 'w', encoding='utf-8') as f:
-                            f.write('\n'.join(content_lines))
-                        files_changed.append(new_path)
-                        current_file = None
-                        continue
-                    elif new_path is None and old_path:
-                        # Delete file
-                        full_path = os.path.join(self.bash_session.cwd, old_path)
-                        if os.path.exists(full_path):
-                            os.unlink(full_path)
-                            files_changed.append(old_path)
-                        current_file = None
-                        i += 1
-                        continue
-                    else:
-                        current_file = new_path
-                    i += 1
-                    continue
-
-            # Detect hunk header
-            if line.startswith('@@ ') and current_file:
-                # Extract anchor context
-                anchor = line.strip('@').strip()
-                current_hunks.append({
-                    'anchor': anchor,
-                    'removes': [],
-                    'adds': [],
-                    'context_before': [],
-                    'context_after': [],
-                })
-                i += 1
-                continue
-
-            # Collect hunk content
-            if current_hunks:
-                if line.startswith('-'):
-                    current_hunks[-1]['removes'].append(line[1:])
-                elif line.startswith('+'):
-                    current_hunks[-1]['adds'].append(line[1:])
-                elif line.startswith(' '):
-                    if not current_hunks[-1]['removes'] and not current_hunks[-1]['adds']:
-                        current_hunks[-1]['context_before'].append(line[1:])
-                    else:
-                        current_hunks[-1]['context_after'].append(line[1:])
-
-            i += 1
-
-        # Apply remaining file's hunks
-        if current_file and current_hunks:
-            err = self._apply_hunks_to_file(current_file, current_hunks)
-            if err:
-                errors.append(err)
-            else:
-                files_changed.append(current_file)
-
-        if errors:
+            hunks = self._codex_parse_patch(patch_text)
+        except ValueError as e:
             return CodexApplyPatchObservation(
-                content='Patch applied with errors:\n' + '\n'.join(errors),
-                files_changed=files_changed,
-                success=len(files_changed) > 0,
-            )
-
-        if not files_changed:
-            return CodexApplyPatchObservation(
-                content='No files were changed by the patch.',
+                content=f'Patch parse error: {e}',
                 files_changed=[],
                 success=False,
             )
 
+        if not hunks:
+            return CodexApplyPatchObservation(
+                content='Patch parsed but contained no file operations.',
+                files_changed=[],
+                success=False,
+            )
+
+        added: list[str] = []
+        modified: list[str] = []
+        deleted: list[str] = []
+        errors: list[str] = []
+
+        for hunk in hunks:
+            hunk_type = hunk['type']
+            path = hunk['path']
+            full_path = os.path.join(self.bash_session.cwd, path)
+
+            try:
+                if hunk_type == 'add':
+                    parent = os.path.dirname(full_path)
+                    if parent and not os.path.exists(parent):
+                        os.makedirs(parent, exist_ok=True)
+                    with open(full_path, 'w', encoding='utf-8') as f:
+                        f.write(hunk['contents'])
+                    added.append(path)
+
+                elif hunk_type == 'delete':
+                    if not os.path.exists(full_path):
+                        errors.append(
+                            f"Delete failed: file not found '{path}'"
+                        )
+                        continue
+                    os.unlink(full_path)
+                    deleted.append(path)
+
+                elif hunk_type == 'update':
+                    if not os.path.exists(full_path):
+                        errors.append(
+                            f"Update failed: file not found '{path}'"
+                        )
+                        continue
+                    if not os.path.isfile(full_path):
+                        errors.append(
+                            f"Update failed: '{path}' is not a regular file"
+                        )
+                        continue
+
+                    err = self._codex_apply_update_hunk(
+                        full_path, hunk['chunks']
+                    )
+                    if err:
+                        errors.append(f"Update failed for '{path}': {err}")
+                        continue
+
+                    move_path = hunk.get('move_path')
+                    if move_path:
+                        dest = os.path.join(self.bash_session.cwd, move_path)
+                        parent = os.path.dirname(dest)
+                        if parent and not os.path.exists(parent):
+                            os.makedirs(parent, exist_ok=True)
+                        os.rename(full_path, dest)
+                        modified.append(move_path)
+                    else:
+                        modified.append(path)
+
+            except Exception as e:
+                errors.append(f"Error processing '{path}': {e}")
+
+        files_changed = added + modified + deleted
+
+        if errors:
+            summary_parts = []
+            if files_changed:
+                summary_parts.append(
+                    f'Partial success ({len(files_changed)} file(s) changed):'
+                )
+                for p in added:
+                    summary_parts.append(f'  A {p}')
+                for p in modified:
+                    summary_parts.append(f'  M {p}')
+                for p in deleted:
+                    summary_parts.append(f'  D {p}')
+            summary_parts.append(
+                f'Errors ({len(errors)}):'
+            )
+            for err in errors:
+                summary_parts.append(f'  - {err}')
+            return CodexApplyPatchObservation(
+                content='\n'.join(summary_parts),
+                files_changed=files_changed,
+                success=False,
+            )
+
+        if not files_changed:
+            return CodexApplyPatchObservation(
+                content='Patch parsed successfully but no files were changed.',
+                files_changed=[],
+                success=False,
+            )
+
+        summary = ['Patch applied successfully. Changed files:']
+        for p in added:
+            summary.append(f'  A {p}')
+        for p in modified:
+            summary.append(f'  M {p}')
+        for p in deleted:
+            summary.append(f'  D {p}')
         return CodexApplyPatchObservation(
-            content=f'Patch applied successfully to {len(files_changed)} file(s).',
+            content='\n'.join(summary),
             files_changed=files_changed,
             success=True,
         )
 
-    def _apply_hunks_to_file(self, filepath: str, hunks: list[dict]) -> str | None:
-        """Apply hunks to a file. Returns error string or None on success."""
-        full_path = os.path.join(self.bash_session.cwd, filepath)
-        if not os.path.exists(full_path):
-            return f"File not found: {filepath}"
+    def _codex_parse_patch(self, patch_text: str) -> list[dict]:
+        """Parse Codex freeform patch format into a list of hunk dicts.
 
+        Returns a list of dicts, each with:
+          {'type': 'add', 'path': str, 'contents': str}
+          {'type': 'delete', 'path': str}
+          {'type': 'update', 'path': str, 'move_path': str|None,
+           'chunks': [{'context': str|None, 'old_lines': [str],
+                        'new_lines': [str], 'is_eof': bool}]}
+
+        Raises ValueError with a descriptive message on parse failure.
+        """
+        lines = patch_text.strip().splitlines()
+        if not lines:
+            raise ValueError('Patch text is empty')
+
+        # Strip heredoc wrapper if present (lenient mode, like gpt-4.1)
+        if lines[0].strip() in ("<<EOF", "<<'EOF'", '<<"EOF"'):
+            if len(lines) >= 4 and lines[-1].strip().endswith('EOF'):
+                lines = lines[1:-1]
+
+        # Validate *** Begin Patch / *** End Patch boundaries
+        if lines[0].strip() != '*** Begin Patch':
+            raise ValueError(
+                f"Expected '*** Begin Patch' on line 1, got: '{lines[0].strip()}'"
+            )
+        if lines[-1].strip() != '*** End Patch':
+            raise ValueError(
+                f"Expected '*** End Patch' on the last line, got: '{lines[-1].strip()}'"
+            )
+
+        # Work with content between markers
+        content_lines = lines[1:-1]
+        hunks: list[dict] = []
+        i = 0
+
+        while i < len(content_lines):
+            line = content_lines[i].strip()
+
+            # Skip blank lines between hunks
+            if not line:
+                i += 1
+                continue
+
+            if line.startswith('*** Add File: '):
+                path = line[len('*** Add File: '):]
+                if not path:
+                    raise ValueError(
+                        f"Empty path in '*** Add File:' on line {i + 2}"
+                    )
+                contents = ''
+                i += 1
+                while i < len(content_lines):
+                    if content_lines[i].startswith('+'):
+                        contents += content_lines[i][1:] + '\n'
+                        i += 1
+                    else:
+                        break
+                hunks.append({
+                    'type': 'add',
+                    'path': path,
+                    'contents': contents,
+                })
+
+            elif line.startswith('*** Delete File: '):
+                path = line[len('*** Delete File: '):]
+                if not path:
+                    raise ValueError(
+                        f"Empty path in '*** Delete File:' on line {i + 2}"
+                    )
+                hunks.append({'type': 'delete', 'path': path})
+                i += 1
+
+            elif line.startswith('*** Update File: '):
+                path = line[len('*** Update File: '):]
+                if not path:
+                    raise ValueError(
+                        f"Empty path in '*** Update File:' on line {i + 2}"
+                    )
+                i += 1
+
+                # Optional: *** Move to: <path>
+                move_path = None
+                if i < len(content_lines) and content_lines[i].strip().startswith('*** Move to: '):
+                    move_path = content_lines[i].strip()[len('*** Move to: '):]
+                    i += 1
+
+                # Parse chunks within this Update File hunk
+                chunks: list[dict] = []
+                while i < len(content_lines):
+                    raw = content_lines[i]
+                    stripped = raw.strip()
+
+                    # Skip blank lines between chunks
+                    if not stripped:
+                        i += 1
+                        continue
+
+                    # Stop at next file-level marker
+                    if stripped.startswith('***'):
+                        break
+
+                    # Parse one chunk
+                    chunk, lines_consumed = self._codex_parse_update_chunk(
+                        content_lines, i, len(chunks) == 0
+                    )
+                    chunks.append(chunk)
+                    i += lines_consumed
+
+                if not chunks:
+                    raise ValueError(
+                        f"Update File hunk for '{path}' contains no change chunks"
+                    )
+
+                hunks.append({
+                    'type': 'update',
+                    'path': path,
+                    'move_path': move_path,
+                    'chunks': chunks,
+                })
+
+            else:
+                raise ValueError(
+                    f"Unexpected line {i + 2}: '{line}'. "
+                    f"Expected '*** Add File:', '*** Delete File:', "
+                    f"or '*** Update File:'"
+                )
+
+        return hunks
+
+    def _codex_parse_update_chunk(
+        self, lines: list[str], start: int, allow_missing_context: bool
+    ) -> tuple[dict, int]:
+        """Parse a single update chunk within an Update File hunk.
+
+        Returns (chunk_dict, lines_consumed).
+        chunk_dict has: context, old_lines, new_lines, is_eof
+        """
+        line = lines[start]
+
+        # Check for @@ context marker
+        context = None
+        idx = start
+        if line.strip() == '@@':
+            context = None
+            idx += 1
+        elif line.startswith('@@ '):
+            context = line[3:]
+            idx += 1
+        else:
+            if not allow_missing_context:
+                raise ValueError(
+                    f"Expected '@@ ...' context marker on line {start + 2}, "
+                    f"got: '{line.strip()}'"
+                )
+
+        old_lines: list[str] = []
+        new_lines: list[str] = []
+        is_eof = False
+        parsed = 0
+
+        while idx < len(lines):
+            raw = lines[idx]
+
+            # *** End of File marker
+            if raw.strip() == '*** End of File':
+                if parsed == 0:
+                    raise ValueError(
+                        f"Empty update chunk at line {idx + 2}"
+                    )
+                is_eof = True
+                idx += 1
+                parsed += 1
+                break
+
+            # Next file-level hunk or next @@ chunk
+            if raw.strip().startswith('***'):
+                break
+            if raw.startswith('@@') and parsed > 0:
+                break
+
+            first_char = raw[0] if raw else ''
+
+            if first_char == ' ':
+                # Context line: goes into both old and new
+                old_lines.append(raw[1:])
+                new_lines.append(raw[1:])
+            elif first_char == '+':
+                new_lines.append(raw[1:])
+            elif first_char == '-':
+                old_lines.append(raw[1:])
+            elif raw == '':
+                # Empty line interpreted as empty context
+                old_lines.append('')
+                new_lines.append('')
+            else:
+                if parsed == 0:
+                    raise ValueError(
+                        f"Unexpected line {idx + 2} in update chunk: '{raw}'. "
+                        f"Lines must start with ' ' (context), '+' (add), "
+                        f"or '-' (remove)"
+                    )
+                # Assume start of next chunk
+                break
+
+            idx += 1
+            parsed += 1
+
+        lines_consumed = idx - start
+        return {
+            'context': context,
+            'old_lines': old_lines,
+            'new_lines': new_lines,
+            'is_eof': is_eof,
+        }, lines_consumed
+
+    @staticmethod
+    def _codex_seek_sequence(
+        lines: list[str],
+        pattern: list[str],
+        start: int,
+        eof: bool = False,
+    ) -> int | None:
+        """Find a sequence of pattern lines within lines, starting at or after start.
+
+        Matches with decreasing strictness: exact, rstrip, trim, unicode-normalized.
+        When eof=True, searches from end of file first.
+        Returns starting index or None.
+        """
+        if not pattern:
+            return start
+        if len(pattern) > len(lines):
+            return None
+
+        search_start = (
+            len(lines) - len(pattern) if eof and len(lines) >= len(pattern)
+            else start
+        )
+        end = len(lines) - len(pattern)
+
+        # Exact match
+        for i in range(search_start, end + 1):
+            if lines[i:i + len(pattern)] == pattern:
+                return i
+
+        # rstrip match
+        for i in range(search_start, end + 1):
+            if all(
+                lines[i + j].rstrip() == p.rstrip()
+                for j, p in enumerate(pattern)
+            ):
+                return i
+
+        # trim match (strip both sides)
+        for i in range(search_start, end + 1):
+            if all(
+                lines[i + j].strip() == p.strip()
+                for j, p in enumerate(pattern)
+            ):
+                return i
+
+        # Unicode-normalized match
+        def _normalize(s: str) -> str:
+            result = []
+            for c in s.strip():
+                if c in '\u2010\u2011\u2012\u2013\u2014\u2015\u2212':
+                    result.append('-')
+                elif c in '\u2018\u2019\u201a\u201b':
+                    result.append("'")
+                elif c in '\u201c\u201d\u201e\u201f':
+                    result.append('"')
+                elif c in '\u00a0\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u202f\u205f\u3000':
+                    result.append(' ')
+                else:
+                    result.append(c)
+            return ''.join(result)
+
+        for i in range(search_start, end + 1):
+            if all(
+                _normalize(lines[i + j]) == _normalize(p)
+                for j, p in enumerate(pattern)
+            ):
+                return i
+
+        return None
+
+    def _codex_apply_update_hunk(
+        self, full_path: str, chunks: list[dict]
+    ) -> str | None:
+        """Apply update chunks to a file. Returns error string or None on success."""
         try:
             with open(full_path, 'r', encoding='utf-8') as f:
-                file_lines = f.read().split('\n')
+                original_contents = f.read()
         except Exception as e:
-            return f"Error reading {filepath}: {e}"
+            return f'Failed to read file: {e}'
 
-        # Apply each hunk
-        for hunk in hunks:
-            anchor = hunk['anchor']
-            removes = hunk['removes']
-            adds = hunk['adds']
+        original_lines = original_contents.split('\n')
+        # Drop trailing empty element from final newline (matches Rust behavior)
+        if original_lines and original_lines[-1] == '':
+            original_lines.pop()
 
-            # Find anchor line in file
-            anchor_idx = None
-            for idx, line in enumerate(file_lines):
-                if line.strip() == anchor.strip():
-                    anchor_idx = idx
-                    break
+        line_index = 0
 
-            if anchor_idx is None:
-                return f"Could not find anchor '{anchor}' in {filepath}"
+        # Compute replacements: list of (start_idx, old_len, new_lines)
+        replacements: list[tuple[int, int, list[str]]] = []
 
-            # Find the position to apply changes (after context lines)
-            context_before = hunk['context_before']
-            apply_start = anchor_idx
-            if context_before:
-                # Match context lines to find exact position
-                for idx in range(anchor_idx, min(anchor_idx + 20, len(file_lines))):
-                    if idx + len(context_before) <= len(file_lines):
-                        match = all(
-                            file_lines[idx + j].strip() == ctx.strip()
-                            for j, ctx in enumerate(context_before)
-                        )
-                        if match:
-                            apply_start = idx + len(context_before)
-                            break
-            else:
-                apply_start = anchor_idx + 1
+        for chunk_idx, chunk in enumerate(chunks):
+            context = chunk.get('context')
+            old_lines = chunk['old_lines']
+            new_lines = chunk['new_lines']
+            is_eof = chunk.get('is_eof', False)
 
-            # Remove lines
-            if removes:
-                for _ in removes:
-                    if apply_start < len(file_lines):
-                        file_lines.pop(apply_start)
+            # If chunk has a context line, seek to it
+            if context is not None:
+                ctx_idx = self._codex_seek_sequence(
+                    original_lines, [context], line_index, False
+                )
+                if ctx_idx is None:
+                    return (
+                        f"Chunk {chunk_idx + 1}: could not find context "
+                        f"line '{context}' in file "
+                        f"(searched from line {line_index + 1})"
+                    )
+                line_index = ctx_idx + 1
 
-            # Add lines
-            for j, add_line in enumerate(adds):
-                file_lines.insert(apply_start + j, add_line)
+            # Pure addition (no old lines)
+            if not old_lines:
+                insertion_idx = (
+                    len(original_lines) - 1
+                    if original_lines and original_lines[-1] == ''
+                    else len(original_lines)
+                )
+                replacements.append((insertion_idx, 0, new_lines))
+                continue
 
-        # Write back
+            # Seek old_lines in the file
+            pattern = old_lines
+            found = self._codex_seek_sequence(
+                original_lines, pattern, line_index, is_eof
+            )
+
+            new_slice = new_lines
+
+            # Retry without trailing empty line (handles EOF edge cases)
+            if found is None and pattern and pattern[-1] == '':
+                pattern = pattern[:-1]
+                if new_slice and new_slice[-1] == '':
+                    new_slice = new_slice[:-1]
+                found = self._codex_seek_sequence(
+                    original_lines, pattern, line_index, is_eof
+                )
+
+            if found is None:
+                # Build a descriptive error message
+                preview = old_lines[:5]
+                if len(old_lines) > 5:
+                    preview.append(f'... ({len(old_lines) - 5} more lines)')
+                preview_str = '\n'.join(f'  {l}' for l in preview)
+                return (
+                    f"Chunk {chunk_idx + 1}: could not find the expected "
+                    f"lines in file (searched from line {line_index + 1}).\n"
+                    f"Looking for:\n{preview_str}"
+                )
+
+            replacements.append((found, len(pattern), list(new_slice)))
+            line_index = found + len(pattern)
+
+        # Sort replacements by position
+        replacements.sort(key=lambda r: r[0])
+
+        # Apply replacements in reverse order so indices stay valid
+        for start_idx, old_len, new_segment in reversed(replacements):
+            del original_lines[start_idx:start_idx + old_len]
+            for offset, new_line in enumerate(new_segment):
+                original_lines.insert(start_idx + offset, new_line)
+
+        # Ensure trailing newline
+        if not original_lines or original_lines[-1] != '':
+            original_lines.append('')
+
         try:
             with open(full_path, 'w', encoding='utf-8') as f:
-                f.write('\n'.join(file_lines))
+                f.write('\n'.join(original_lines))
         except Exception as e:
-            return f"Error writing {filepath}: {e}"
+            return f'Failed to write file: {e}'
 
         return None
 

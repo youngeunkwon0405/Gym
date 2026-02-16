@@ -12,15 +12,13 @@ from unittest.mock import patch
 import pytest
 from litellm import ModelResponse
 
-from openhands.agenthub.codeact_agent.function_calling import response_to_actions
-from openhands.agenthub.codeact_agent.tools import (
-    EditTool,
-    GlobTool,
-    GrepTool,
-    ListDirTool,
-    ReadTool,
-    WriteTool,
-)
+from openhands.agenthub.opencode_agent.function_calling import response_to_actions
+from openhands.agenthub.opencode_agent.tools.edit import EditTool
+from openhands.agenthub.opencode_agent.tools.glob import GlobTool
+from openhands.agenthub.opencode_agent.tools.grep import GrepTool
+from openhands.agenthub.opencode_agent.tools.list_dir import ListDirTool
+from openhands.agenthub.opencode_agent.tools.read import ReadTool
+from openhands.agenthub.opencode_agent.tools.write import WriteTool
 from openhands.core.exceptions import FunctionCallValidationError
 from openhands.core.schema import ActionType
 from openhands.events.action import (
@@ -31,6 +29,7 @@ from openhands.events.action import (
     OpenCodeReadAction,
     OpenCodeWriteAction,
 )
+from openhands.events.action.agent import ValidationFailureAction
 from openhands.events.event import FileEditSource
 from openhands.llm.tool_names import (
     EDIT_TOOL_NAME,
@@ -236,11 +235,12 @@ class TestReadToolFunctionCalling:
         assert actions[0].limit == 100
 
     def test_read_tool_missing_file_path(self):
-        """Test ReadTool raises error when file_path is missing."""
+        """Test ReadTool returns ValidationFailureAction when file_path is missing."""
         response = create_mock_response(READ_TOOL_NAME, {'offset': 10})
-        with pytest.raises(FunctionCallValidationError) as exc_info:
-            response_to_actions(response)
-        assert 'Missing required argument "file_path"' in str(exc_info.value)
+        actions = response_to_actions(response)
+        assert len(actions) == 1
+        assert isinstance(actions[0], ValidationFailureAction)
+        assert 'file_path' in actions[0].error_message.lower()
 
     def test_read_tool_with_thought(self):
         """Test ReadTool preserves thought content."""
@@ -295,18 +295,20 @@ class TestWriteToolFunctionCalling:
         assert actions[0].content == ''
 
     def test_write_tool_missing_file_path(self):
-        """Test WriteTool raises error when file_path is missing."""
+        """Test WriteTool returns ValidationFailureAction when file_path is missing."""
         response = create_mock_response(WRITE_TOOL_NAME, {'content': 'some content'})
-        with pytest.raises(FunctionCallValidationError) as exc_info:
-            response_to_actions(response)
-        assert 'Missing required argument "file_path"' in str(exc_info.value)
+        actions = response_to_actions(response)
+        assert len(actions) == 1
+        assert isinstance(actions[0], ValidationFailureAction)
+        assert 'file_path' in actions[0].error_message.lower()
 
     def test_write_tool_missing_content(self):
-        """Test WriteTool raises error when content is missing."""
+        """Test WriteTool returns ValidationFailureAction when content is missing."""
         response = create_mock_response(WRITE_TOOL_NAME, {'file_path': '/path/to/file.py'})
-        with pytest.raises(FunctionCallValidationError) as exc_info:
-            response_to_actions(response)
-        assert 'Missing required argument "content"' in str(exc_info.value)
+        actions = response_to_actions(response)
+        assert len(actions) == 1
+        assert isinstance(actions[0], ValidationFailureAction)
+        assert 'content' in actions[0].error_message.lower()
 
     def test_write_tool_special_characters(self):
         """Test WriteTool handles special characters in content."""
@@ -374,31 +376,34 @@ class TestEditToolFunctionCalling:
         assert actions[0].new_str == ''
 
     def test_edit_tool_missing_file_path(self):
-        """Test EditTool raises error when file_path is missing."""
+        """Test EditTool returns ValidationFailureAction when file_path is missing."""
         response = create_mock_response(
             EDIT_TOOL_NAME, {'old_string': 'old', 'new_string': 'new'}
         )
-        with pytest.raises(FunctionCallValidationError) as exc_info:
-            response_to_actions(response)
-        assert 'Missing required argument "file_path"' in str(exc_info.value)
+        actions = response_to_actions(response)
+        assert len(actions) == 1
+        assert isinstance(actions[0], ValidationFailureAction)
+        assert 'file_path' in actions[0].error_message.lower()
 
     def test_edit_tool_missing_old_string(self):
-        """Test EditTool raises error when old_string is missing."""
+        """Test EditTool returns ValidationFailureAction when old_string is missing."""
         response = create_mock_response(
             EDIT_TOOL_NAME, {'file_path': '/path/to/file.py', 'new_string': 'new'}
         )
-        with pytest.raises(FunctionCallValidationError) as exc_info:
-            response_to_actions(response)
-        assert 'Missing required argument "old_string"' in str(exc_info.value)
+        actions = response_to_actions(response)
+        assert len(actions) == 1
+        assert isinstance(actions[0], ValidationFailureAction)
+        assert 'old_string' in actions[0].error_message.lower()
 
     def test_edit_tool_missing_new_string(self):
-        """Test EditTool raises error when new_string is missing."""
+        """Test EditTool returns ValidationFailureAction when new_string is missing."""
         response = create_mock_response(
             EDIT_TOOL_NAME, {'file_path': '/path/to/file.py', 'old_string': 'old'}
         )
-        with pytest.raises(FunctionCallValidationError) as exc_info:
-            response_to_actions(response)
-        assert 'Missing required argument "new_string"' in str(exc_info.value)
+        actions = response_to_actions(response)
+        assert len(actions) == 1
+        assert isinstance(actions[0], ValidationFailureAction)
+        assert 'new_string' in actions[0].error_message.lower()
 
 
 # ==============================================================================
@@ -438,11 +443,12 @@ class TestGlobToolFunctionCalling:
         assert actions[0].pattern == '**/*.test.js'
 
     def test_glob_tool_missing_pattern(self):
-        """Test GlobTool raises error when pattern is missing."""
+        """Test GlobTool returns ValidationFailureAction when pattern is missing."""
         response = create_mock_response(GLOB_TOOL_NAME, {'path': '/some/path'})
-        with pytest.raises(FunctionCallValidationError) as exc_info:
-            response_to_actions(response)
-        assert 'Missing required argument "pattern"' in str(exc_info.value)
+        actions = response_to_actions(response)
+        assert len(actions) == 1
+        assert isinstance(actions[0], ValidationFailureAction)
+        assert 'pattern' in actions[0].error_message.lower()
 
     def test_glob_tool_complex_patterns(self):
         """Test GlobTool with various glob patterns."""
@@ -511,11 +517,12 @@ class TestGrepToolFunctionCalling:
         assert actions[0].include == '*.{js,ts}'
 
     def test_grep_tool_missing_pattern(self):
-        """Test GrepTool raises error when pattern is missing."""
+        """Test GrepTool returns ValidationFailureAction when pattern is missing."""
         response = create_mock_response(GREP_TOOL_NAME, {'path': '/some/path'})
-        with pytest.raises(FunctionCallValidationError) as exc_info:
-            response_to_actions(response)
-        assert 'Missing required argument "pattern"' in str(exc_info.value)
+        actions = response_to_actions(response)
+        assert len(actions) == 1
+        assert isinstance(actions[0], ValidationFailureAction)
+        assert 'pattern' in actions[0].error_message.lower()
 
     def test_grep_tool_regex_pattern(self):
         """Test GrepTool with regex patterns."""
@@ -763,9 +770,10 @@ class TestEdgeCases:
                 }
             ],
         )
-        with pytest.raises(FunctionCallValidationError) as exc_info:
-            response_to_actions(response)
-        assert 'Failed to parse tool call arguments' in str(exc_info.value)
+        actions = response_to_actions(response)
+        assert len(actions) == 1
+        assert isinstance(actions[0], ValidationFailureAction)
+        assert 'parse' in actions[0].error_message.lower() or 'json' in actions[0].error_message.lower()
 
     def test_unicode_in_paths(self):
         """Test handling of Unicode characters in paths."""

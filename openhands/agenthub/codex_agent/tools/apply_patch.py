@@ -4,49 +4,65 @@ from openhands.llm.tool_names import CODEX_APPLY_PATCH_TOOL_NAME
 
 _APPLY_PATCH_DESCRIPTION = r"""Use the apply_patch tool to edit files.
 
-It should be used whenever you want to create or edit a file.
+It should be used whenever you want to create, edit, or delete a file.
 
 IMPORTANT: NEVER, EVER use apply_patch to write tests, test files, or any code that verifies behavior. Only use it for production code, configurations, and documentation.
 
-Patch format:
-
-Each patch should be a series of *** Begin Patch / *** End Patch blocks, one per file:
+The patch format is a stripped-down, file-oriented diff format. The envelope is:
 
 *** Begin Patch
-[file operation]
+[ one or more file operations ]
 *** End Patch
 
-Supported file operations:
+Each operation starts with one of three headers:
 
-1. Update a file:
-*** Begin Patch
---- a/path/to/file
-+++ b/path/to/file
-@@ context line from original file @@
--line to remove
-+line to add
- context line (unchanged)
-*** End Patch
+*** Add File: <path> - create a new file. Every following line is a + line (the initial contents).
+*** Delete File: <path> - remove an existing file. Nothing follows.
+*** Update File: <path> - patch an existing file in place (optionally with a rename).
 
-2. Create a new file:
-*** Begin Patch
---- /dev/null
-+++ b/path/to/new/file
-+first line
-+second line
-*** End Patch
+Update File may be immediately followed by *** Move to: <new path> to rename.
+Then one or more "hunks", each introduced by @@ (optionally followed by a context anchor).
+Within a hunk each line starts with:
+  " " (space) - context line (must match the original file)
+  "-" - line to remove
+  "+" - line to add
 
-3. Delete a file:
+Context guidelines:
+- Show 3 lines of code above and below each change for context.
+- If 3 lines is insufficient to uniquely identify the location, use @@ with a class or function name:
+  @@ class MyClass
+  @@ def my_method():
+
+The full grammar:
+Patch := Begin { FileOp } End
+Begin := "*** Begin Patch" NEWLINE
+End := "*** End Patch" NEWLINE
+FileOp := AddFile | DeleteFile | UpdateFile
+AddFile := "*** Add File: " path NEWLINE { "+" line NEWLINE }
+DeleteFile := "*** Delete File: " path NEWLINE
+UpdateFile := "*** Update File: " path NEWLINE [ MoveTo ] { Hunk }
+MoveTo := "*** Move to: " newPath NEWLINE
+Hunk := "@@" [ " " header ] NEWLINE { HunkLine } [ "*** End of File" NEWLINE ]
+HunkLine := (" " | "-" | "+") text NEWLINE
+
+A full example combining several operations:
+
 *** Begin Patch
---- a/path/to/file
-+++ /dev/null
+*** Add File: hello.txt
++Hello world
+*** Update File: src/app.py
+*** Move to: src/main.py
+@@ def greet():
+-print("Hi")
++print("Hello, world!")
+*** Delete File: obsolete.txt
 *** End Patch
 
 Notes:
-- Context lines (starting with a space) must match exactly.
-- The @@ line must contain a line that exists in the original file to anchor the patch.
+- You must include a header with your intended action (Add/Delete/Update).
+- You must prefix new lines with + even when creating a new file.
+- File paths must be relative, NEVER absolute.
 - Multiple hunks can be included for the same file by using multiple @@ anchors.
-- To move/rename a file, delete the old path and create the new path.
 """
 
 ApplyPatchTool = ChatCompletionToolParam(
