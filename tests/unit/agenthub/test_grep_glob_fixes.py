@@ -209,6 +209,81 @@ class TestGrepAlternationFallback:
 
 
 # ==============================================================================
+# Grep: Invalid regex returns informative error observation
+# ==============================================================================
+
+
+class TestGrepInvalidRegexError:
+    """Test that grep returns informative errors for invalid regex patterns.
+
+    Bug: patterns like 'write_records(' contain '(' which is an unmatched
+    regex group in -E mode, causing grep to return exit code 2 (error).
+    The error was hidden by 2>/dev/null, silently returning "No matches found."
+
+    Fix: detect exit code 2 and return an ErrorObservation that tells the LLM
+    the pattern has invalid regex syntax and how to fix it.
+    """
+
+    def test_grep_E_fails_on_unmatched_paren(self, workspace):
+        """Demonstrate that grep -E fails on unmatched parenthesis."""
+        result = subprocess.run(
+            ['grep', '-Ern', 'ComputeEnvironment(', workspace],
+            capture_output=True,
+            text=True,
+        )
+        # Exit code 2 = regex error
+        assert result.returncode == 2
+
+    def test_grep_F_matches_literal_paren(self, workspace):
+        """Verify that grep -F would match literal parenthesis (for reference)."""
+        result = subprocess.run(
+            ['grep', '-Frn', 'ComputeEnvironment(', workspace],
+            capture_output=True,
+            text=True,
+        )
+        lines = [l for l in result.stdout.strip().split('\n') if l.strip()]
+        assert len(lines) >= 1, f'Expected matches for literal "(", got: {lines}'
+        assert any('models.py' in l for l in lines)
+
+    def test_handler_returns_error_for_invalid_regex(self, workspace):
+        """Handler should return ErrorObservation for invalid regex, not silent empty results."""
+        import shlex
+
+        pattern = 'ComputeEnvironment('
+        search_path = workspace
+
+        cmd_str = (
+            f'grep -rl -E {shlex.quote(pattern)} {shlex.quote(search_path)}'
+        )
+        result = subprocess.run(
+            cmd_str, shell=True, capture_output=True, text=True, timeout=30
+        )
+        # The handler detects exit code 2 and returns an ErrorObservation
+        assert result.returncode == 2, (
+            f'Expected exit code 2 for invalid regex, got {result.returncode}'
+        )
+
+    def test_valid_regex_still_works(self, workspace):
+        """Valid regex patterns (alternation) should still work with -E."""
+        import shlex
+
+        pattern = 'create_compute_environment|CreateComputeEnvironment'
+        search_path = workspace
+
+        cmd_str = (
+            f'grep -rl -E {shlex.quote(pattern)} {shlex.quote(search_path)}'
+        )
+        result = subprocess.run(
+            cmd_str, shell=True, capture_output=True, text=True, timeout=30
+        )
+        # Exit code 0 = matches found (not 2)
+        assert result.returncode == 0
+
+        files = [f.strip() for f in result.stdout.strip().split('\n') if f.strip()]
+        assert len(files) >= 2, f'Expected >= 2 files with alternation, got: {files}'
+
+
+# ==============================================================================
 # Grep: Combined fix (ripgrep path)
 # ==============================================================================
 

@@ -967,15 +967,26 @@ class ActionExecutor:
             elif result.returncode == 1:
                 # Exit code 1 = no matches found (not an error)
                 raw_lines = []
+            elif result.returncode == 2:
+                # Exit code 2 = regex syntax error (e.g. unmatched parenthesis)
+                stderr = result.stderr.strip()
+                return ErrorObservation(
+                    f"Invalid regex pattern: {action.pattern!r}. "
+                    f"The pattern is treated as a regex. Characters like (, ), [, ], "
+                    f"{{, }}, ., *, +, ? have special meaning and must be escaped "
+                    f"with a backslash (e.g. 'write_records\\(' instead of 'write_records('). "
+                    f"Detail: {stderr}"
+                )
             elif result.returncode not in (0, 1):
-                logger.warning(f"rg failed: {result.stderr.strip()}")
+                stderr = result.stderr.strip()
+                logger.warning(f"rg failed: {stderr}")
                 rg_available = False
         except FileNotFoundError:
             rg_available = False
         except subprocess.TimeoutExpired:
             return ErrorObservation("grep search timed out after 30 seconds")
 
-        # Fallback to grep -E (extended regex for | alternation support)
+        # Fallback to grep if rg is not available
         if not rg_available:
             try:
                 if include:
@@ -983,20 +994,29 @@ class ActionExecutor:
                     grep_include = include
                     if grep_include.startswith('**/'):
                         grep_include = grep_include[3:]
-
-                    cmd_str = (
-                        f'grep -ErHn --include={shlex.quote(grep_include)} '
-                        f'{shlex.quote(action.pattern)} {shlex.quote(search_path)} 2>/dev/null'
-                    )
+                    include_flag = f'--include={shlex.quote(grep_include)} '
                 else:
-                    cmd_str = (
-                        f'grep -Ern {shlex.quote(action.pattern)} '
-                        f'{shlex.quote(search_path)} 2>/dev/null'
-                    )
+                    include_flag = ''
+
+                cmd_str = (
+                    f'grep -rHn {include_flag}'
+                    f'-E {shlex.quote(action.pattern)} {shlex.quote(search_path)}'
+                )
                 result = subprocess.run(
                     cmd_str,
                     shell=True, capture_output=True, text=True, timeout=30, cwd=working_dir
                 )
+
+                if result.returncode == 2:
+                    # Exit code 2 = regex syntax error
+                    return ErrorObservation(
+                        f"Invalid regex pattern: {action.pattern!r}. "
+                        f"The pattern is treated as a regex. Characters like (, ), [, ], "
+                        f"{{, }}, ., *, +, ? have special meaning and must be escaped "
+                        f"with a backslash (e.g. 'write_records\\(' instead of 'write_records('). "
+                        f"Alternatively, remov the sepecial characters from the pattern."
+                    )
+
                 if result.stdout.strip():
                     raw_lines = [l for l in result.stdout.strip().split('\n') if l.strip()]
             except subprocess.TimeoutExpired:
@@ -1542,8 +1562,18 @@ class ActionExecutor:
             elif result.returncode == 1:
                 # Exit code 1 = no matches (not an error)
                 files = []
+            elif result.returncode == 2:
+                # Exit code 2 = regex syntax error (e.g. unmatched parenthesis)
+                stderr = result.stderr.strip()
+                return ErrorObservation(
+                    f"Invalid regex pattern: {pattern!r}. "
+                    f"The pattern is treated as a regex. Characters like (, ), [, ], "
+                    f"{{, }}, ., *, +, ? have special meaning and must be escaped "
+                    f"with a backslash (e.g. 'write_records\\(' instead of 'write_records('). "
+                    f"Detail: {stderr}"
+                )
             elif result.returncode not in (0, 1):
-                # rg failed with an error
+                # rg failed with a non-regex error
                 stderr = result.stderr.strip()
                 logger.warning(f"rg failed: {stderr}")
                 # Fall through to grep fallback
@@ -1563,18 +1593,28 @@ class ActionExecutor:
                     find_pattern = include
                     if find_pattern.startswith('**/'):
                         find_pattern = find_pattern[3:]
-
-                    cmd_str = (
-                        f'grep -rl --include={shlex.quote(find_pattern)} '
-                        f'-E {shlex.quote(pattern)} {shlex.quote(search_path)} 2>/dev/null'
-                    )
+                    include_flag = f'--include={shlex.quote(find_pattern)} '
                 else:
-                    cmd_str = (
-                        f'grep -rl -E {shlex.quote(pattern)} {shlex.quote(search_path)} 2>/dev/null'
-                    )
+                    include_flag = ''
+
+                cmd_str = (
+                    f'grep -rl {include_flag}'
+                    f'-E {shlex.quote(pattern)} {shlex.quote(search_path)}'
+                )
                 result = subprocess.run(
                     cmd_str, shell=True, capture_output=True, text=True, timeout=30, cwd=working_dir
                 )
+
+                if result.returncode == 2:
+                    # Exit code 2 = regex syntax error
+                    return ErrorObservation(
+                        f"Invalid regex pattern: {pattern!r}. "
+                        f"The pattern is treated as a regex. Characters like (, ), [, ], "
+                        f"{{, }}, ., *, +, ? have special meaning and must be escaped "
+                        f"with a backslash (e.g. 'write_records\\(' instead of 'write_records('). "
+                        f"Alternatively, remove the special characters from the pattern."
+                    )
+
                 if result.stdout.strip():
                     files = [f.strip() for f in result.stdout.strip().split('\n') if f.strip()]
 

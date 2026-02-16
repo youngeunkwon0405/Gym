@@ -592,6 +592,33 @@ class TestCodexGrepFilesHandler:
         obs = asyncio.get_event_loop().run_until_complete(executor.codex_grep_files(action))
         assert 'file.py' in obs.content
 
+    def test_grep_invalid_regex_returns_error(self, executor, temp_workspace):
+        """Invalid regex pattern (unmatched paren) returns informative ErrorObservation.
+
+        Bug: patterns like 'write_records(' silently returned 'No matches found.'
+        Fix: return ErrorObservation explaining regex is invalid and how to escape.
+        """
+        create_test_file(temp_workspace, 'func.py', 'def write_records(data):\n    pass')
+
+        action = CodexGrepFilesAction(pattern='write_records(', path=temp_workspace)
+        obs = asyncio.get_event_loop().run_until_complete(executor.codex_grep_files(action))
+        # Should be an ErrorObservation, not a silent "No matches found."
+        assert isinstance(obs, ErrorObservation), (
+            f"Expected ErrorObservation for invalid regex, got: {type(obs).__name__}: {obs.content}"
+        )
+        assert 'invalid regex' in obs.content.lower() or 'escaped' in obs.content.lower()
+
+    def test_grep_valid_regex_alternation_works(self, executor, temp_workspace):
+        """Valid regex with alternation (|) should still work."""
+        create_test_file(temp_workspace, 'a.py', 'def foo(): pass')
+        create_test_file(temp_workspace, 'b.py', 'def bar(): pass')
+
+        action = CodexGrepFilesAction(pattern='foo|bar', path=temp_workspace)
+        obs = asyncio.get_event_loop().run_until_complete(executor.codex_grep_files(action))
+        assert isinstance(obs, CmdOutputObservation)
+        assert 'a.py' in obs.content
+        assert 'b.py' in obs.content
+
 
 # ==============================================================================
 # CodexApplyPatch Handler Tests

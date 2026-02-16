@@ -683,6 +683,31 @@ class TestGrepHandler:
         obs = run(executor.grep(action))
         assert 'no matches' in obs.content.lower() or 'no files' in obs.content.lower()
 
+    def test_grep_invalid_regex_returns_error(self, executor, temp_workspace):
+        """Invalid regex pattern (unmatched paren) returns informative ErrorObservation.
+
+        Bug: 'write_records(' silently returned 'No matches found' because
+        grep -E exit code 2 was hidden by 2>/dev/null.
+        Fix: detect exit code 2 and return ErrorObservation with fix guidance.
+        """
+        create_test_file(temp_workspace, 'func.py', 'def write_records(data):\n    pass')
+        action = GrepAction(pattern='write_records(', path=temp_workspace)
+        obs = run(executor.grep(action))
+        assert isinstance(obs, ErrorObservation), (
+            f"Expected ErrorObservation for invalid regex, got: {type(obs).__name__}: {obs.content}"
+        )
+        assert 'invalid regex' in obs.content.lower() or 'escaped' in obs.content.lower()
+
+    def test_grep_valid_regex_alternation_works(self, executor, temp_workspace):
+        """Valid regex with alternation (|) should still work."""
+        create_test_file(temp_workspace, 'a.py', 'def foo(): pass')
+        create_test_file(temp_workspace, 'b.py', 'def bar(): pass')
+        action = GrepAction(pattern='foo|bar', path=temp_workspace)
+        obs = run(executor.grep(action))
+        assert isinstance(obs, CmdOutputObservation)
+        assert 'foo' in obs.content
+        assert 'bar' in obs.content
+
 
 # ==============================================================================
 # ListDir Handler Tests
