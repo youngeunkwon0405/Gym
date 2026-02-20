@@ -287,6 +287,133 @@ class TestDoubleConfirmation:
         assert pending is False
         assert action == 'continue'
 
+    def test_first_task_complete_with_no_commands_returns_noop(self):
+        """First task_complete=True with empty commands should return a no-op
+        action (to capture terminal state) rather than finishing immediately."""
+        from collections import deque
+
+        pending_completion = False
+        pending_actions: deque = deque()
+        commands: list = []
+        is_task_complete = True
+        response_text = '{"analysis":"done","plan":"none","commands":[],"task_complete":true}'
+
+        if is_task_complete:
+            if pending_completion:
+                result = 'finish'
+            else:
+                pending_completion = True
+                result = None
+        else:
+            pending_completion = False
+            result = None
+
+        for i, cmd in enumerate(commands):
+            pending_actions.append(cmd)
+
+        if result is None and not pending_actions:
+            if pending_completion:
+                result = 'noop_for_confirmation'
+            else:
+                result = 'think'
+
+        assert pending_completion is True
+        assert result == 'noop_for_confirmation'
+
+    def test_first_task_complete_with_commands_queues_normally(self):
+        """First task_complete=True with commands should queue them normally."""
+        from collections import deque
+
+        pending_completion = False
+        pending_actions: deque = deque()
+        is_task_complete = True
+        commands = [
+            ParsedCommand(keystrokes='ls\n', duration=0.1),
+        ]
+
+        if is_task_complete:
+            if pending_completion:
+                result = 'finish'
+            else:
+                pending_completion = True
+                result = None
+        else:
+            pending_completion = False
+            result = None
+
+        for i, cmd in enumerate(commands):
+            pending_actions.append(cmd)
+
+        if result is None and not pending_actions:
+            if pending_completion:
+                result = 'noop_for_confirmation'
+            else:
+                result = 'think'
+        elif result is None:
+            result = 'pop_pending'
+
+        assert pending_completion is True
+        assert len(pending_actions) == 1
+        assert result == 'pop_pending'
+
+    def test_confirmation_message_appended_when_pending(self):
+        """_build_messages should append COMPLETION_CONFIRMATION when _pending_completion is True."""
+        user_msg = MessageAction(content='Task')
+        user_msg._source = EventSource.USER
+        noop = Terminus2CmdRunAction(keystrokes='', duration=0.5)
+        initial_obs = Terminus2CmdOutputObservation(
+            content='Current Terminal Screen:\nroot@host:/app# ',
+            terminal_state='Current Terminal Screen:\nroot@host:/app# ',
+        )
+        resp = '{"analysis":"done","plan":"done","commands":[],"task_complete":true}'
+        noop2 = Terminus2CmdRunAction(keystrokes='', duration=0.5, thought=resp)
+        confirm_obs = Terminus2CmdOutputObservation(
+            content='Current Terminal Screen:\nroot@host:/app# ',
+            terminal_state='Current Terminal Screen:\nroot@host:/app# ',
+        )
+
+        events = [user_msg, noop, initial_obs, noop2, confirm_obs]
+
+        pending_completion = True
+
+        messages = []
+        messages.append(('system', 'system_prompt'))
+
+        initial_terminal_event = initial_obs
+        first_text = f'{user_msg.content}\n\n{initial_terminal_event.terminal_state}'
+        messages.append(('user', first_text))
+
+        batch_observations: list[str] = []
+        for event in events:
+            if isinstance(event, Terminus2CmdRunAction):
+                if event.thought:
+                    if batch_observations:
+                        messages.append(('user', batch_observations[-1]))
+                        batch_observations = []
+                    messages.append(('assistant', event.thought))
+            elif isinstance(event, Terminus2CmdOutputObservation):
+                if event is initial_terminal_event:
+                    continue
+                batch_observations.append(event.terminal_state)
+
+        if batch_observations:
+            messages.append(('user', batch_observations[-1]))
+
+        if pending_completion:
+            last_terminal = batch_observations[-1] if batch_observations else ''
+            confirmation = (
+                f'Current terminal state:\n{last_terminal}\n\n'
+                'Are you sure you want to mark the task as complete? '
+                "This will trigger your solution to be graded and you won't be able to "
+                'make any further corrections. If so, include "task_complete": true '
+                'in your JSON response again.'
+            )
+            messages.append(('user', confirmation))
+
+        assert any('Are you sure you want to mark the task as complete?' in m[1] for m in messages)
+        assert messages[-1][0] == 'user'
+        assert 'task_complete' in messages[-1][1]
+
 
 # ==============================================================================
 # Observation Handling Tests

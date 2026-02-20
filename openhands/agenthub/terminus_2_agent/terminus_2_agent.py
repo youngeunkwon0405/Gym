@@ -160,13 +160,8 @@ class Terminus2Agent(Agent):
                 return AgentFinishAction(thought='Task completed (confirmed)')
             else:
                 self._pending_completion = True
-                if not commands:
-                    return AgentFinishAction(thought='Task completed (confirmed)')
         else:
             self._pending_completion = False
-
-        if not commands:
-            return AgentThinkAction(thought='No commands to execute, waiting for next input')
 
         for i, cmd in enumerate(commands):
             action = Terminus2CmdRunAction(
@@ -175,6 +170,13 @@ class Terminus2Agent(Agent):
                 thought=response_text if i == 0 else '',
             )
             self.pending_actions.append(action)
+
+        if not self.pending_actions:
+            if self._pending_completion:
+                return Terminus2CmdRunAction(
+                    keystrokes='', duration=0.5, thought=response_text
+                )
+            return AgentThinkAction(thought='No commands to execute, waiting for next input')
 
         return self.pending_actions.popleft()
 
