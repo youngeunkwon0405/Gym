@@ -633,14 +633,20 @@ class TestConversationHistoryReconstruction:
                     continue
                 elif event.source == EventSource.AGENT:
                     if batch_observations:
-                        messages.append(('user', batch_observations[-1]))
+                        combined = Terminus2Agent._combine_observations(
+                            batch_observations
+                        )
+                        messages.append(('user', combined))
                         batch_observations = []
                     messages.append(('assistant', event.content))
 
             elif isinstance(event, Terminus2CmdRunAction):
                 if event.thought:
                     if batch_observations:
-                        messages.append(('user', batch_observations[-1]))
+                        combined = Terminus2Agent._combine_observations(
+                            batch_observations
+                        )
+                        messages.append(('user', combined))
                         batch_observations = []
                     messages.append(('assistant', event.thought))
 
@@ -653,7 +659,8 @@ class TestConversationHistoryReconstruction:
                 batch_observations.append(f'ERROR: {event.content}')
 
         if batch_observations:
-            messages.append(('user', batch_observations[-1]))
+            combined = Terminus2Agent._combine_observations(batch_observations)
+            messages.append(('user', combined))
 
         return messages
 
@@ -709,7 +716,7 @@ class TestConversationHistoryReconstruction:
         assert 'file.py' in msgs[3][1]
 
     def test_multi_command_batch(self):
-        """Multiple commands from one LLM call: only last observation becomes user message."""
+        """Multiple commands from one LLM call: ALL observations are combined into one user message."""
         llm_response = '{"analysis":"a","plan":"p","commands":[{"keystrokes":"ls\\n"},{"keystrokes":"pwd\\n"}]}'
 
         user_msg = MessageAction(content='Task')
@@ -721,13 +728,13 @@ class TestConversationHistoryReconstruction:
         )
         cmd1 = Terminus2CmdRunAction(keystrokes='ls\n', duration=0.1, thought=llm_response)
         obs1 = Terminus2CmdOutputObservation(
-            content='New Terminal Output:\nls output',
-            terminal_state='New Terminal Output:\nls output',
+            content='New Terminal Output:\nroot@host:/app# ls\nfile.py\nroot@host:/app# ',
+            terminal_state='New Terminal Output:\nroot@host:/app# ls\nfile.py\nroot@host:/app# ',
         )
         cmd2 = Terminus2CmdRunAction(keystrokes='pwd\n', duration=0.1, thought='')
         obs2 = Terminus2CmdOutputObservation(
-            content='New Terminal Output:\npwd output',
-            terminal_state='New Terminal Output:\npwd output',
+            content='New Terminal Output:\nroot@host:/app# pwd\n/app\nroot@host:/app# ',
+            terminal_state='New Terminal Output:\nroot@host:/app# pwd\n/app\nroot@host:/app# ',
         )
 
         events = [user_msg, noop, initial_obs, cmd1, obs1, cmd2, obs2]
@@ -737,7 +744,11 @@ class TestConversationHistoryReconstruction:
         assert msgs[2][0] == 'assistant'
         assert msgs[2][1] == llm_response
         assert msgs[3][0] == 'user'
-        assert 'pwd output' in msgs[3][1]
+        assert 'ls' in msgs[3][1]
+        assert 'file.py' in msgs[3][1]
+        assert 'pwd' in msgs[3][1]
+        assert '/app' in msgs[3][1]
+        assert msgs[3][1].count('New Terminal Output:') == 1
 
     def test_two_round_trips(self):
         """Two LLM calls produce: sys, user, asst, user, asst, user."""
@@ -925,19 +936,22 @@ class TestTerminalScreenFormatting:
     """
 
     @staticmethod
-    def _format_terminal_screen(obs, command):
+    def _format_terminal_screen(obs, command, pre_cwd=None):
         """Pure-function copy of ActionExecutor._format_terminal_screen."""
         meta = obs.metadata
         username = meta.username or 'root'
         hostname = meta.hostname or 'sandbox'
-        cwd = meta.working_dir or '/'
+        post_cwd = meta.working_dir or '/'
         suffix = '#' if username == 'root' else '$'
-        prompt = f'{username}@{hostname}:{cwd}{suffix} '
 
-        lines = [f'{prompt}{command}']
+        before_cwd = pre_cwd if pre_cwd else post_cwd
+        pre_prompt = f'{username}@{hostname}:{before_cwd}{suffix} '
+        post_prompt = f'{username}@{hostname}:{post_cwd}{suffix} '
+
+        lines = [f'{pre_prompt}{command}']
         if obs.content.strip():
             lines.append(obs.content)
-        lines.append(prompt)
+        lines.append(post_prompt)
         return '\n'.join(lines)
 
     def _make_obs(self, content, username=None, hostname=None, working_dir=None):
@@ -1037,6 +1051,36 @@ class TestTerminalScreenFormatting:
         result = self._format_terminal_screen(obs, long_cmd)
         assert long_cmd in result.split('\n')[0]
 
+    def test_cd_pre_cwd_differs_from_post_cwd(self):
+        """cd /app/src: pre-command prompt shows /app, post-command prompt shows /app/src."""
+        obs = self._make_obs(
+            '', username='root', hostname='host', working_dir='/app/src'
+        )
+        result = self._format_terminal_screen(obs, 'cd /app/src', pre_cwd='/app')
+        lines = result.split('\n')
+        assert lines[0] == 'root@host:/app# cd /app/src'
+        assert lines[1] == 'root@host:/app/src# '
+
+    def test_no_pre_cwd_uses_post_cwd_for_both(self):
+        """Without pre_cwd, both prompts use the post-execution cwd (backward compat)."""
+        obs = self._make_obs(
+            '', username='root', hostname='h', working_dir='/new'
+        )
+        result = self._format_terminal_screen(obs, 'cd /new')
+        lines = result.split('\n')
+        assert lines[0] == 'root@h:/new# cd /new'
+        assert lines[1] == 'root@h:/new# '
+
+    def test_non_cd_command_same_cwd(self):
+        """Normal command: pre_cwd == post_cwd, both prompts identical."""
+        obs = self._make_obs(
+            'file.py', username='root', hostname='h', working_dir='/app'
+        )
+        result = self._format_terminal_screen(obs, 'ls', pre_cwd='/app')
+        lines = result.split('\n')
+        assert lines[0] == 'root@h:/app# ls'
+        assert lines[-1] == 'root@h:/app# '
+
 
 # ==============================================================================
 # Terminal Output Prefix Tests
@@ -1090,3 +1134,73 @@ class TestTerminalOutputPrefixes:
         assert terminal_state.startswith('New Terminal Output:')
         content_after_prefix = terminal_state[len('New Terminal Output:\n'):]
         assert content_after_prefix.startswith('root@host:/app#')
+
+
+# ==============================================================================
+# Batch Observation Combination Tests
+# ==============================================================================
+
+
+class TestCombineObservations:
+    """Tests for _combine_observations which merges multiple terminal outputs
+    from a command batch into a single user message, matching the original
+    Terminus-2 behavior where get_incremental_output() captures all commands.
+    """
+
+    def test_single_observation_returned_as_is(self):
+        obs = ['New Terminal Output:\nroot@h:/# ls\nfile.py\nroot@h:/# ']
+        result = Terminus2Agent._combine_observations(obs)
+        assert result == obs[0]
+
+    def test_empty_list_returns_empty_string(self):
+        result = Terminus2Agent._combine_observations([])
+        assert result == ''
+
+    def test_two_observations_combined_under_single_prefix(self):
+        obs1 = 'New Terminal Output:\nroot@h:/app# ls\nfile.py\nroot@h:/app# '
+        obs2 = 'New Terminal Output:\nroot@h:/app# pwd\n/app\nroot@h:/app# '
+        result = Terminus2Agent._combine_observations([obs1, obs2])
+        assert result.startswith('New Terminal Output:\n')
+        assert result.count('New Terminal Output:') == 1
+        assert 'ls' in result
+        assert 'file.py' in result
+        assert 'pwd' in result
+        assert '/app' in result
+
+    def test_three_observations_all_content_present(self):
+        obs1 = 'New Terminal Output:\nroot@h:/# ls -l\ntotal 4\nroot@h:/# '
+        obs2 = 'New Terminal Output:\nroot@h:/# ls *.py\nscript.py\nroot@h:/# '
+        obs3 = 'New Terminal Output:\nroot@h:/# grep foo .\n./match\nroot@h:/# '
+        result = Terminus2Agent._combine_observations([obs1, obs2, obs3])
+        assert result.count('New Terminal Output:') == 1
+        assert 'ls -l' in result
+        assert 'total 4' in result
+        assert 'script.py' in result
+        assert 'grep foo' in result
+        assert './match' in result
+
+    def test_mixed_prefixes_uses_last(self):
+        """If last observation was a timeout (Current Terminal Screen:), use that prefix."""
+        obs1 = 'New Terminal Output:\nroot@h:/# ls\nfile.py\nroot@h:/# '
+        obs2 = 'Current Terminal Screen:\nroot@h:/# sleep 100\n'
+        result = Terminus2Agent._combine_observations([obs1, obs2])
+        assert result.startswith('Current Terminal Screen:\n')
+        assert result.count('Current Terminal Screen:') == 1
+        assert 'ls' in result
+        assert 'sleep 100' in result
+
+    def test_no_prefix_observations_preserved(self):
+        """Observations without a recognized prefix are included as-is."""
+        obs1 = 'some raw output'
+        obs2 = 'New Terminal Output:\nroot@h:/# pwd\n/\nroot@h:/# '
+        result = Terminus2Agent._combine_observations([obs1, obs2])
+        assert 'some raw output' in result
+        assert 'pwd' in result
+
+    def test_error_mixed_with_observations(self):
+        """ERROR observations (no prefix) are combined with normal observations."""
+        obs1 = 'New Terminal Output:\nroot@h:/# ls\nfile.py\nroot@h:/# '
+        obs2 = 'ERROR: command failed'
+        result = Terminus2Agent._combine_observations([obs1, obs2])
+        assert 'file.py' in result
+        assert 'ERROR: command failed' in result

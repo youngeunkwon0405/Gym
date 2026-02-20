@@ -222,7 +222,9 @@ class Terminus2Agent(Agent):
                     continue
                 elif event.source == EventSource.AGENT:
                     if batch_observations:
-                        terminal_output = batch_observations[-1]
+                        terminal_output = self._combine_observations(
+                            batch_observations
+                        )
                         user_text = self._format_terminal_output(
                             terminal_output, last_timed_out, last_keystrokes
                         )
@@ -243,7 +245,9 @@ class Terminus2Agent(Agent):
                 last_keystrokes = event.keystrokes
                 if event.thought:
                     if batch_observations:
-                        terminal_output = batch_observations[-1]
+                        terminal_output = self._combine_observations(
+                            batch_observations
+                        )
                         user_text = self._format_terminal_output(
                             terminal_output, last_timed_out, last_keystrokes
                         )
@@ -273,7 +277,7 @@ class Terminus2Agent(Agent):
                 pass
 
         if batch_observations:
-            terminal_output = batch_observations[-1]
+            terminal_output = self._combine_observations(batch_observations)
             if self._pending_completion:
                 confirmation = COMPLETION_CONFIRMATION.format(
                     terminal_state=terminal_output
@@ -316,6 +320,40 @@ class Terminus2Agent(Agent):
             if isinstance(event, Terminus2CmdOutputObservation):
                 return event
         return None
+
+    _NEW_OUTPUT_PREFIX = 'New Terminal Output:\n'
+    _SCREEN_PREFIX = 'Current Terminal Screen:\n'
+
+    @staticmethod
+    def _combine_observations(observations: list[str]) -> str:
+        """Combine multiple terminal observations into a single output.
+
+        In the original Terminus-2, all commands in a batch execute in tmux and
+        then a single get_incremental_output() captures the cumulative output.
+        This method replicates that by stripping the per-observation prefix,
+        joining the raw screen content, and re-adding a single prefix.
+        """
+        if not observations:
+            return ''
+        if len(observations) == 1:
+            return observations[0]
+
+        new_pfx = Terminus2Agent._NEW_OUTPUT_PREFIX
+        scr_pfx = Terminus2Agent._SCREEN_PREFIX
+
+        screens: list[str] = []
+        last_prefix = new_pfx
+        for obs in observations:
+            if obs.startswith(new_pfx):
+                screens.append(obs[len(new_pfx):])
+                last_prefix = new_pfx
+            elif obs.startswith(scr_pfx):
+                screens.append(obs[len(scr_pfx):])
+                last_prefix = scr_pfx
+            else:
+                screens.append(obs)
+
+        return last_prefix + '\n'.join(screens)
 
     def _format_terminal_output(
         self, terminal_output: str, timed_out: bool, keystrokes: str

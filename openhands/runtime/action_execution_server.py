@@ -2222,28 +2222,33 @@ class ActionExecutor:
             return ErrorObservation(f'Failed to update plan: {str(e)}')
 
     def _format_terminal_screen(
-        self, obs: CmdOutputObservation, command: str
+        self, obs: CmdOutputObservation, command: str, pre_cwd: str | None = None
     ) -> str:
         """Format a CmdOutputObservation to look like a tmux capture-pane screen.
 
+        The pre-command prompt uses pre_cwd (the directory before execution),
+        and the post-command prompt uses the actual post-execution working_dir
+        from metadata. This matches real terminal behavior where e.g.
+        ``cd /app/src`` shows the old cwd before the command and the new cwd after.
+
         Produces output like:
-            root@hostname:/app# ls -la
-            total 775
-            drwxr-xr-x  3 root root  3 Sep 13 17:59 .
-            ...
-            root@hostname:/app#
+            root@hostname:/app# cd /app/src
+            root@hostname:/app/src#
         """
         meta = obs.metadata
         username = meta.username or 'root'
         hostname = meta.hostname or 'sandbox'
-        cwd = meta.working_dir or '/'
+        post_cwd = meta.working_dir or '/'
         suffix = '#' if username == 'root' else '$'
-        prompt = f'{username}@{hostname}:{cwd}{suffix} '
 
-        lines = [f'{prompt}{command}']
+        before_cwd = pre_cwd if pre_cwd else post_cwd
+        pre_prompt = f'{username}@{hostname}:{before_cwd}{suffix} '
+        post_prompt = f'{username}@{hostname}:{post_cwd}{suffix} '
+
+        lines = [f'{pre_prompt}{command}']
         if obs.content.strip():
             lines.append(obs.content)
-        lines.append(prompt)
+        lines.append(post_prompt)
         return '\n'.join(lines)
 
     async def terminus_2_cmd_run(
@@ -2264,12 +2269,13 @@ class ActionExecutor:
 
             keystrokes = action.keystrokes
             duration = min(action.duration, 60)
+            pre_cwd = bash_session.cwd
 
             if keystrokes == '' or keystrokes.strip() == '':
                 cmd_action = CmdRunAction(command='pwd')
                 cmd_action.set_hard_timeout(duration + 5, blocking=False)
                 obs = await call_sync_from_async(bash_session.execute, cmd_action)
-                screen = self._format_terminal_screen(obs, 'pwd')
+                screen = self._format_terminal_screen(obs, 'pwd', pre_cwd)
                 terminal_state = f'Current Terminal Screen:\n{screen}'
                 return Terminus2CmdOutputObservation(
                     content=terminal_state,
@@ -2283,7 +2289,7 @@ class ActionExecutor:
                 cmd_action = CmdRunAction(command=special_key)
                 cmd_action.set_hard_timeout(duration + 5, blocking=False)
                 obs = await call_sync_from_async(bash_session.execute, cmd_action)
-                screen = self._format_terminal_screen(obs, f'^{"C" if special_key == "C-c" else "D"}')
+                screen = self._format_terminal_screen(obs, f'^{"C" if special_key == "C-c" else "D"}', pre_cwd)
                 terminal_state = f'New Terminal Output:\n{screen}'
                 return Terminus2CmdOutputObservation(
                     content=terminal_state,
@@ -2301,7 +2307,7 @@ class ActionExecutor:
             if hasattr(obs, 'metadata') and obs.metadata:
                 timed_out = getattr(obs.metadata, 'exit_code', 0) == -1
 
-            screen = self._format_terminal_screen(obs, command)
+            screen = self._format_terminal_screen(obs, command, pre_cwd)
             if timed_out:
                 terminal_state = f'Current Terminal Screen:\n{screen}'
             else:
