@@ -397,12 +397,21 @@ class TestDoubleConfirmation:
                 batch_observations.append(event.terminal_state)
 
         if batch_observations:
-            messages.append(('user', batch_observations[-1]))
-
-        if pending_completion:
-            last_terminal = batch_observations[-1] if batch_observations else ''
+            terminal_output = batch_observations[-1]
+            if pending_completion:
+                confirmation = (
+                    f'Current terminal state:\n{terminal_output}\n\n'
+                    'Are you sure you want to mark the task as complete? '
+                    "This will trigger your solution to be graded and you won't be able to "
+                    'make any further corrections. If so, include "task_complete": true '
+                    'in your JSON response again.'
+                )
+                messages.append(('user', confirmation))
+            else:
+                messages.append(('user', terminal_output))
+        elif pending_completion:
             confirmation = (
-                f'Current terminal state:\n{last_terminal}\n\n'
+                'Current terminal state:\n\n\n'
                 'Are you sure you want to mark the task as complete? '
                 "This will trigger your solution to be graded and you won't be able to "
                 'make any further corrections. If so, include "task_complete": true '
@@ -413,6 +422,8 @@ class TestDoubleConfirmation:
         assert any('Are you sure you want to mark the task as complete?' in m[1] for m in messages)
         assert messages[-1][0] == 'user'
         assert 'task_complete' in messages[-1][1]
+        user_messages = [m for m in messages if m[0] == 'user']
+        assert len(user_messages) == 2  # initial task + confirmation (NOT three)
 
 
 # ==============================================================================

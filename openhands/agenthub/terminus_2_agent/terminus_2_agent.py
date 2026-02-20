@@ -274,16 +274,22 @@ class Terminus2Agent(Agent):
 
         if batch_observations:
             terminal_output = batch_observations[-1]
-            user_text = self._format_terminal_output(
-                terminal_output, last_timed_out, last_keystrokes
-            )
-            messages.append(
-                Message(role='user', content=[TextContent(text=user_text)])
-            )
-
-        if self._pending_completion:
-            last_terminal = batch_observations[-1] if batch_observations else ''
-            confirmation = COMPLETION_CONFIRMATION.format(terminal_state=last_terminal)
+            if self._pending_completion:
+                confirmation = COMPLETION_CONFIRMATION.format(
+                    terminal_state=terminal_output
+                )
+                messages.append(
+                    Message(role='user', content=[TextContent(text=confirmation)])
+                )
+            else:
+                user_text = self._format_terminal_output(
+                    terminal_output, last_timed_out, last_keystrokes
+                )
+                messages.append(
+                    Message(role='user', content=[TextContent(text=user_text)])
+                )
+        elif self._pending_completion:
+            confirmation = COMPLETION_CONFIRMATION.format(terminal_state='')
             messages.append(
                 Message(role='user', content=[TextContent(text=confirmation)])
             )
