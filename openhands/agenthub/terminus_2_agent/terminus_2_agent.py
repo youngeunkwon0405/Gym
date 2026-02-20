@@ -153,14 +153,13 @@ class Terminus2Agent(Agent):
 
         messages = self._build_messages(condensed_history, state)
 
-        commands, is_task_complete = self._call_llm_and_parse(messages)
+        commands, is_task_complete, response_text = self._call_llm_and_parse(messages)
 
         if is_task_complete:
             if self._pending_completion:
                 return AgentFinishAction(thought='Task completed (confirmed)')
             else:
                 self._pending_completion = True
-                # Execute any accompanying commands, then ask for confirmation next round
                 if not commands:
                     return AgentFinishAction(thought='Task completed (confirmed)')
         else:
@@ -169,10 +168,11 @@ class Terminus2Agent(Agent):
         if not commands:
             return AgentThinkAction(thought='No commands to execute, waiting for next input')
 
-        for cmd in commands:
+        for i, cmd in enumerate(commands):
             action = Terminus2CmdRunAction(
                 keystrokes=cmd.keystrokes,
                 duration=min(cmd.duration, 60),
+                thought=response_text if i == 0 else '',
             )
             self.pending_actions.append(action)
 
@@ -198,12 +198,13 @@ class Terminus2Agent(Agent):
         messages.append(Message(role='system', content=[TextContent(text=system_prompt)]))
 
         initial_user_msg = self._find_initial_user_message(condensed_history)
+        initial_terminal_event = self._find_initial_terminal_event(condensed_history)
+
         if initial_user_msg:
-            initial_terminal = self._find_initial_terminal_state(condensed_history)
-            if initial_terminal:
+            if initial_terminal_event is not None:
                 first_user_text = (
                     f'{initial_user_msg}\n\n'
-                    f'Current terminal state:\n{initial_terminal}'
+                    f'Current terminal state:\n{initial_terminal_event.terminal_state}'
                 )
             else:
                 first_user_text = initial_user_msg
@@ -260,6 +261,8 @@ class Terminus2Agent(Agent):
                     )
 
             elif isinstance(event, Terminus2CmdOutputObservation):
+                if event is initial_terminal_event:
+                    continue
                 batch_observations.append(event.terminal_state)
                 last_timed_out = event.timed_out
 
@@ -294,17 +297,19 @@ class Terminus2Agent(Agent):
                 return event.content
         return None
 
-    def _find_initial_terminal_state(self, events: list[Event]) -> str:
-        """Find the first terminal output from the event history.
+    def _find_initial_terminal_event(
+        self, events: list[Event]
+    ) -> Terminus2CmdOutputObservation | None:
+        """Find the first Terminus2CmdOutputObservation in the event history.
 
-        This is used to populate the {{ terminal_state }} variable in
-        user_prompt.j2 for the initial user message. If no terminal
-        observation has been recorded yet, returns an empty string.
+        Returns the event object itself (not just the string) so that
+        _build_messages can skip it in the loop via identity comparison,
+        avoiding duplication with the first user message.
         """
         for event in events:
             if isinstance(event, Terminus2CmdOutputObservation):
-                return event.terminal_state
-        return ''
+                return event
+        return None
 
     def _format_terminal_output(
         self, terminal_output: str, timed_out: bool, keystrokes: str
@@ -320,8 +325,13 @@ class Terminus2Agent(Agent):
 
     def _call_llm_and_parse(
         self, messages: list[Message]
-    ) -> tuple[list[ParsedCommand], bool]:
-        """Call the LLM and parse the JSON response, with retry on parse errors."""
+    ) -> tuple[list[ParsedCommand], bool, str]:
+        """Call the LLM and parse the JSON response, with retry on parse errors.
+
+        Returns (commands, is_task_complete, response_text) where response_text
+        is the raw LLM output that must be stored on the first action's thought
+        field so _build_messages can reconstruct the assistant turn later.
+        """
         for attempt in range(MAX_LLM_RETRY):
             params: dict = {
                 'messages': messages,
@@ -356,10 +366,10 @@ class Terminus2Agent(Agent):
                 ParsedCommand(keystrokes=cmd.keystrokes, duration=min(cmd.duration, 60))
                 for cmd in result.commands
             ]
-            return commands, result.is_task_complete
+            return commands, result.is_task_complete, response_text
 
         logger.error('Terminus-2: exhausted LLM retries due to parse errors')
-        return [], False
+        return [], False, ''
 
     @staticmethod
     def _limit_output_length(output: str, max_bytes: int = MAX_OUTPUT_BYTES) -> str:

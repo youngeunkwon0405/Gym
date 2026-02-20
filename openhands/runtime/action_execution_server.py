@@ -2221,14 +2221,39 @@ class ActionExecutor:
             logger.exception(f'Error updating plan: {e}')
             return ErrorObservation(f'Failed to update plan: {str(e)}')
 
+    def _format_terminal_screen(
+        self, obs: CmdOutputObservation, command: str
+    ) -> str:
+        """Format a CmdOutputObservation to look like a tmux capture-pane screen.
+
+        Produces output like:
+            root@hostname:/app# ls -la
+            total 775
+            drwxr-xr-x  3 root root  3 Sep 13 17:59 .
+            ...
+            root@hostname:/app#
+        """
+        meta = obs.metadata
+        username = meta.username or 'root'
+        hostname = meta.hostname or 'sandbox'
+        cwd = meta.working_dir or '/'
+        suffix = '#' if username == 'root' else '$'
+        prompt = f'{username}@{hostname}:{cwd}{suffix} '
+
+        lines = [f'{prompt}{command}']
+        if obs.content.strip():
+            lines.append(obs.content)
+        lines.append(prompt)
+        return '\n'.join(lines)
+
     async def terminus_2_cmd_run(
         self, action: Terminus2CmdRunAction
     ) -> Terminus2CmdOutputObservation | ErrorObservation:
         """Execute Terminus-2 keystroke action via BashSession.
 
         Converts keystrokes to a command, executes via the bash session,
-        and returns the terminal output as a screen capture observation.
-        Handles special tmux-style key sequences (C-c, C-d).
+        and returns the terminal output formatted like a tmux screen capture
+        (prompt + command echo + output + next prompt).
         """
         try:
             bash_session = self.bash_session
@@ -2237,51 +2262,47 @@ class ActionExecutor:
             keystrokes = action.keystrokes
             duration = min(action.duration, 60)
 
-            if keystrokes.strip() == 'C-c':
-                cmd_action = CmdRunAction(command='C-c')
-                cmd_action.set_hard_timeout(duration, blocking=False)
+            if keystrokes == '' or keystrokes.strip() == '':
+                cmd_action = CmdRunAction(command='pwd')
+                cmd_action.set_hard_timeout(duration + 5, blocking=False)
                 obs = await call_sync_from_async(bash_session.execute, cmd_action)
+                terminal_state = self._format_terminal_screen(obs, 'pwd')
                 return Terminus2CmdOutputObservation(
-                    content=obs.content,
-                    terminal_state=obs.content,
+                    content=terminal_state,
+                    terminal_state=terminal_state,
                     timed_out=False,
                     command_keystrokes=keystrokes,
                 )
-            elif keystrokes.strip() == 'C-d':
-                cmd_action = CmdRunAction(command='C-d')
-                cmd_action.set_hard_timeout(duration, blocking=False)
-                obs = await call_sync_from_async(bash_session.execute, cmd_action)
-                return Terminus2CmdOutputObservation(
-                    content=obs.content,
-                    terminal_state=obs.content,
-                    timed_out=False,
-                    command_keystrokes=keystrokes,
-                )
-            elif keystrokes == '' or keystrokes.strip() == '':
-                import asyncio as _asyncio
-                await _asyncio.sleep(duration)
-                return Terminus2CmdOutputObservation(
-                    content='[waited {:.1f}s]'.format(duration),
-                    terminal_state='[waited {:.1f}s]'.format(duration),
-                    timed_out=False,
-                    command_keystrokes=keystrokes,
-                )
-            else:
-                command = keystrokes.rstrip('\n')
-                cmd_action = CmdRunAction(command=command)
-                cmd_action.set_hard_timeout(duration + 10, blocking=False)
-                obs = await call_sync_from_async(bash_session.execute, cmd_action)
 
-                timed_out = False
-                if hasattr(obs, 'metadata') and obs.metadata:
-                    timed_out = getattr(obs.metadata, 'exit_code', 0) == -1
-
+            if keystrokes.strip() in ('C-c', 'C-d'):
+                special_key = keystrokes.strip()
+                cmd_action = CmdRunAction(command=special_key)
+                cmd_action.set_hard_timeout(duration + 5, blocking=False)
+                obs = await call_sync_from_async(bash_session.execute, cmd_action)
+                terminal_state = self._format_terminal_screen(obs, f'^{"C" if special_key == "C-c" else "D"}')
                 return Terminus2CmdOutputObservation(
-                    content=obs.content,
-                    terminal_state=obs.content,
-                    timed_out=timed_out,
+                    content=terminal_state,
+                    terminal_state=terminal_state,
+                    timed_out=False,
                     command_keystrokes=keystrokes,
                 )
+
+            command = keystrokes.rstrip('\n')
+            cmd_action = CmdRunAction(command=command)
+            cmd_action.set_hard_timeout(duration + 10, blocking=False)
+            obs = await call_sync_from_async(bash_session.execute, cmd_action)
+
+            timed_out = False
+            if hasattr(obs, 'metadata') and obs.metadata:
+                timed_out = getattr(obs.metadata, 'exit_code', 0) == -1
+
+            terminal_state = self._format_terminal_screen(obs, command)
+            return Terminus2CmdOutputObservation(
+                content=terminal_state,
+                terminal_state=terminal_state,
+                timed_out=timed_out,
+                command_keystrokes=keystrokes,
+            )
         except Exception as e:
             logger.exception(f'Error executing Terminus-2 keystrokes: {e}')
             return ErrorObservation(str(e))
