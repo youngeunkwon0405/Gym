@@ -242,7 +242,6 @@ class Terminus2Agent(Agent):
                     )
 
             elif isinstance(event, Terminus2CmdRunAction):
-                last_keystrokes = event.keystrokes
                 if event.thought:
                     if batch_observations:
                         terminal_output = self._combine_observations(
@@ -263,6 +262,7 @@ class Terminus2Agent(Agent):
                             content=[TextContent(text=event.thought)],
                         )
                     )
+                last_keystrokes = event.keystrokes
 
             elif isinstance(event, Terminus2CmdOutputObservation):
                 if event is initial_terminal_event:
