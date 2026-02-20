@@ -173,8 +173,11 @@ class Terminus2Agent(Agent):
 
         Converts the event stream into a user/assistant message sequence:
         - System message: JSON format instructions from the prompt template
-        - First user message: task instruction + initial terminal state
-          (rendered via user_prompt.j2)
+        - First user message: the instruction content (from get_instruction /
+          INSTRUCTION_TEMPLATE_PATH) used directly, with initial terminal state
+          appended if available. This keeps the agent consistent with CodeAct/
+          Codex/OpenCode which pass the MessageAction.content through unchanged,
+          so that INSTRUCTION_TEMPLATE_PATH overrides work without double-wrapping.
         - Subsequent turns: assistant = LLM JSON response, user = terminal output
         """
         messages: list[Message] = []
@@ -185,10 +188,13 @@ class Terminus2Agent(Agent):
         initial_user_msg = self._find_initial_user_message(condensed_history)
         if initial_user_msg:
             initial_terminal = self._find_initial_terminal_state(condensed_history)
-            first_user_text = self.prompt_manager.user_template.render(
-                task=initial_user_msg,
-                terminal_state=initial_terminal,
-            ).strip()
+            if initial_terminal:
+                first_user_text = (
+                    f'{initial_user_msg}\n\n'
+                    f'Current terminal state:\n{initial_terminal}'
+                )
+            else:
+                first_user_text = initial_user_msg
             messages.append(
                 Message(role='user', content=[TextContent(text=first_user_text)])
             )
