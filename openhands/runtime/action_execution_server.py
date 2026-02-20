@@ -70,6 +70,7 @@ from openhands.events.action.codex import (
     CodexReadFileAction,
     CodexUpdatePlanAction,
 )
+from openhands.events.action.terminus_2 import Terminus2CmdRunAction
 from openhands.events.event import FileEditSource, FileReadSource
 from openhands.events.observation import (
     CmdOutputObservation,
@@ -91,6 +92,7 @@ from openhands.events.observation.codex import (
     CodexApplyPatchObservation,
     CodexUpdatePlanObservation,
 )
+from openhands.events.observation.terminus_2 import Terminus2CmdOutputObservation
 from openhands.events.serialization import event_from_dict, event_to_dict
 from openhands.runtime.browser import browse
 from openhands.runtime.browser.browser_env import BrowserEnv
@@ -2218,6 +2220,71 @@ class ActionExecutor:
         except Exception as e:
             logger.exception(f'Error updating plan: {e}')
             return ErrorObservation(f'Failed to update plan: {str(e)}')
+
+    async def terminus_2_cmd_run(
+        self, action: Terminus2CmdRunAction
+    ) -> Terminus2CmdOutputObservation | ErrorObservation:
+        """Execute Terminus-2 keystroke action via BashSession.
+
+        Converts keystrokes to a command, executes via the bash session,
+        and returns the terminal output as a screen capture observation.
+        Handles special tmux-style key sequences (C-c, C-d).
+        """
+        try:
+            bash_session = self.bash_session
+            assert bash_session is not None
+
+            keystrokes = action.keystrokes
+            duration = min(action.duration, 60)
+
+            if keystrokes.strip() == 'C-c':
+                cmd_action = CmdRunAction(command='C-c')
+                cmd_action.set_hard_timeout(duration, blocking=False)
+                obs = await call_sync_from_async(bash_session.execute, cmd_action)
+                return Terminus2CmdOutputObservation(
+                    content=obs.content,
+                    terminal_state=obs.content,
+                    timed_out=False,
+                    command_keystrokes=keystrokes,
+                )
+            elif keystrokes.strip() == 'C-d':
+                cmd_action = CmdRunAction(command='C-d')
+                cmd_action.set_hard_timeout(duration, blocking=False)
+                obs = await call_sync_from_async(bash_session.execute, cmd_action)
+                return Terminus2CmdOutputObservation(
+                    content=obs.content,
+                    terminal_state=obs.content,
+                    timed_out=False,
+                    command_keystrokes=keystrokes,
+                )
+            elif keystrokes == '' or keystrokes.strip() == '':
+                import asyncio as _asyncio
+                await _asyncio.sleep(duration)
+                return Terminus2CmdOutputObservation(
+                    content='[waited {:.1f}s]'.format(duration),
+                    terminal_state='[waited {:.1f}s]'.format(duration),
+                    timed_out=False,
+                    command_keystrokes=keystrokes,
+                )
+            else:
+                command = keystrokes.rstrip('\n')
+                cmd_action = CmdRunAction(command=command)
+                cmd_action.set_hard_timeout(duration + 10, blocking=False)
+                obs = await call_sync_from_async(bash_session.execute, cmd_action)
+
+                timed_out = False
+                if hasattr(obs, 'metadata') and obs.metadata:
+                    timed_out = getattr(obs.metadata, 'exit_code', 0) == -1
+
+                return Terminus2CmdOutputObservation(
+                    content=obs.content,
+                    terminal_state=obs.content,
+                    timed_out=timed_out,
+                    command_keystrokes=keystrokes,
+                )
+        except Exception as e:
+            logger.exception(f'Error executing Terminus-2 keystrokes: {e}')
+            return ErrorObservation(str(e))
 
     async def browse(self, action: BrowseURLAction) -> Observation:
         if self.browser is None:

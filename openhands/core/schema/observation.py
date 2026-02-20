@@ -99,3 +99,7 @@ class ObservationType(str, Enum):
 
     CODEX_UPDATE_PLAN = 'codex_update_plan'
     """Result of updating the task plan."""
+
+    # Terminus-2-style observations
+    TERMINUS_2_CMD_OUTPUT = 'terminus_2_cmd_output'
+    """Result of sending keystrokes to a terminal session, containing captured screen state."""
