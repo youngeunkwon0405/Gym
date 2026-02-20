@@ -2252,8 +2252,11 @@ class ActionExecutor:
         """Execute Terminus-2 keystroke action via BashSession.
 
         Converts keystrokes to a command, executes via the bash session,
-        and returns the terminal output formatted like a tmux screen capture
-        (prompt + command echo + output + next prompt).
+        and returns terminal output formatted like the original Terminus-2
+        tmux capture with appropriate prefix:
+        - "Current Terminal Screen:" for initial captures (empty keystrokes)
+          and timed-out commands
+        - "New Terminal Output:" for normal command output
         """
         try:
             bash_session = self.bash_session
@@ -2266,7 +2269,8 @@ class ActionExecutor:
                 cmd_action = CmdRunAction(command='pwd')
                 cmd_action.set_hard_timeout(duration + 5, blocking=False)
                 obs = await call_sync_from_async(bash_session.execute, cmd_action)
-                terminal_state = self._format_terminal_screen(obs, 'pwd')
+                screen = self._format_terminal_screen(obs, 'pwd')
+                terminal_state = f'Current Terminal Screen:\n{screen}'
                 return Terminus2CmdOutputObservation(
                     content=terminal_state,
                     terminal_state=terminal_state,
@@ -2279,7 +2283,8 @@ class ActionExecutor:
                 cmd_action = CmdRunAction(command=special_key)
                 cmd_action.set_hard_timeout(duration + 5, blocking=False)
                 obs = await call_sync_from_async(bash_session.execute, cmd_action)
-                terminal_state = self._format_terminal_screen(obs, f'^{"C" if special_key == "C-c" else "D"}')
+                screen = self._format_terminal_screen(obs, f'^{"C" if special_key == "C-c" else "D"}')
+                terminal_state = f'New Terminal Output:\n{screen}'
                 return Terminus2CmdOutputObservation(
                     content=terminal_state,
                     terminal_state=terminal_state,
@@ -2296,7 +2301,11 @@ class ActionExecutor:
             if hasattr(obs, 'metadata') and obs.metadata:
                 timed_out = getattr(obs.metadata, 'exit_code', 0) == -1
 
-            terminal_state = self._format_terminal_screen(obs, command)
+            screen = self._format_terminal_screen(obs, command)
+            if timed_out:
+                terminal_state = f'Current Terminal Screen:\n{screen}'
+            else:
+                terminal_state = f'New Terminal Output:\n{screen}'
             return Terminus2CmdOutputObservation(
                 content=terminal_state,
                 terminal_state=terminal_state,

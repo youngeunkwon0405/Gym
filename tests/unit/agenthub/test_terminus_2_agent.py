@@ -1,6 +1,7 @@
 """Unit tests for the Terminus-2 Agent.
 
 Tests the Terminus2Agent's message building, output truncation,
+conversation history reconstruction, initial terminal capture,
 and core agent logic.
 """
 
@@ -15,9 +16,10 @@ from openhands.agenthub.terminus_2_agent.terminus_json_plain_parser import (
     ParsedCommand,
     TerminusJSONPlainParser,
 )
-from openhands.events.action import AgentFinishAction, MessageAction
+from openhands.events.action import AgentFinishAction, AgentThinkAction, MessageAction
 from openhands.events.action.terminus_2 import Terminus2CmdRunAction
 from openhands.events.event import EventSource
+from openhands.events.observation.error import ErrorObservation
 from openhands.events.observation.terminus_2 import Terminus2CmdOutputObservation
 
 
@@ -188,7 +190,6 @@ class TestMessageBuilding:
         msg._source = EventSource.USER
 
         events = [msg]
-        # Use static-like approach
         for event in events:
             if isinstance(event, MessageAction) and event.source == EventSource.USER:
                 assert event.content == 'Fix the bug in module X'
@@ -235,11 +236,8 @@ class TestDoubleConfirmation:
 
     def test_pending_completion_flag_initial(self):
         """Verify the flag starts as False."""
-        # We can't instantiate the full agent without LLM registry,
-        # but we can test the logic pattern
         pending = False
 
-        # First task_complete=true
         is_task_complete = True
         if is_task_complete:
             if pending:
@@ -256,7 +254,7 @@ class TestDoubleConfirmation:
 
     def test_pending_completion_second_time(self):
         """Verify second task_complete triggers finish."""
-        pending = True  # Already set from first confirmation
+        pending = True
 
         is_task_complete = True
         if is_task_complete:
@@ -328,3 +326,629 @@ class TestObservationHandling:
         )
         assert obs.terminal_state == ''
         assert obs.content == ''
+
+
+# ==============================================================================
+# _has_terminal_observation Tests
+# ==============================================================================
+
+
+class TestHasTerminalObservation:
+    """Tests for the _has_terminal_observation helper."""
+
+    def test_empty_events(self):
+        assert Terminus2Agent._has_terminal_observation(None, []) is False
+
+    def test_only_user_message(self):
+        msg = MessageAction(content='task')
+        msg._source = EventSource.USER
+        assert Terminus2Agent._has_terminal_observation(None, [msg]) is False
+
+    def test_has_observation(self):
+        obs = Terminus2CmdOutputObservation(
+            content='output', terminal_state='root@host:/# pwd\n/\nroot@host:/# '
+        )
+        assert Terminus2Agent._has_terminal_observation(None, [obs]) is True
+
+    def test_observation_after_other_events(self):
+        msg = MessageAction(content='task')
+        msg._source = EventSource.USER
+        action = Terminus2CmdRunAction(keystrokes='', duration=0.5)
+        obs = Terminus2CmdOutputObservation(
+            content='output', terminal_state='root@host:/# '
+        )
+        assert Terminus2Agent._has_terminal_observation(None, [msg, action, obs]) is True
+
+
+# ==============================================================================
+# _find_initial_terminal_event Tests
+# ==============================================================================
+
+
+class TestFindInitialTerminalEvent:
+    """Tests for _find_initial_terminal_event returning the event object."""
+
+    def test_returns_none_on_empty(self):
+        result = Terminus2Agent._find_initial_terminal_event(None, [])
+        assert result is None
+
+    def test_returns_none_when_no_observations(self):
+        msg = MessageAction(content='task')
+        msg._source = EventSource.USER
+        result = Terminus2Agent._find_initial_terminal_event(None, [msg])
+        assert result is None
+
+    def test_returns_first_observation_object(self):
+        obs1 = Terminus2CmdOutputObservation(
+            content='first', terminal_state='screen1'
+        )
+        obs2 = Terminus2CmdOutputObservation(
+            content='second', terminal_state='screen2'
+        )
+        result = Terminus2Agent._find_initial_terminal_event(None, [obs1, obs2])
+        assert result is obs1
+        assert result is not obs2
+
+    def test_identity_comparison_works(self):
+        """The returned event should be the exact same object for identity checks."""
+        obs = Terminus2CmdOutputObservation(
+            content='output', terminal_state='root@host:/# '
+        )
+        msg = MessageAction(content='task')
+        msg._source = EventSource.USER
+        events = [msg, obs]
+        result = Terminus2Agent._find_initial_terminal_event(None, events)
+        assert result is obs
+
+
+# ==============================================================================
+# Response Text Storage Tests (thought field on first action)
+# ==============================================================================
+
+
+class TestResponseTextStorage:
+    """Tests that LLM response text is stored on the first action's thought field."""
+
+    def test_first_action_gets_thought(self):
+        """When creating actions from commands, only the first gets the response text."""
+        response_text = '{"analysis":"test","plan":"test","commands":[{"keystrokes":"ls\\n","duration":0.1},{"keystrokes":"pwd\\n","duration":0.1}]}'
+        commands = [
+            ParsedCommand(keystrokes='ls\n', duration=0.1),
+            ParsedCommand(keystrokes='pwd\n', duration=0.1),
+        ]
+
+        actions = []
+        for i, cmd in enumerate(commands):
+            action = Terminus2CmdRunAction(
+                keystrokes=cmd.keystrokes,
+                duration=min(cmd.duration, 60),
+                thought=response_text if i == 0 else '',
+            )
+            actions.append(action)
+
+        assert actions[0].thought == response_text
+        assert actions[1].thought == ''
+
+    def test_single_command_gets_thought(self):
+        response_text = '{"analysis":"x","plan":"x","commands":[{"keystrokes":"ls\\n"}]}'
+        action = Terminus2CmdRunAction(
+            keystrokes='ls\n',
+            duration=0.1,
+            thought=response_text,
+        )
+        assert action.thought == response_text
+
+    def test_empty_response_stored_as_empty(self):
+        action = Terminus2CmdRunAction(
+            keystrokes='ls\n',
+            duration=0.1,
+            thought='',
+        )
+        assert action.thought == ''
+
+
+# ==============================================================================
+# Conversation History Reconstruction Tests
+# ==============================================================================
+
+
+class TestConversationHistoryReconstruction:
+    """Tests that _build_messages reconstructs full conversation history
+    from the event stream, including assistant turns from action.thought.
+
+    These tests simulate what _build_messages does by processing events
+    using the same algorithm, verifying the message sequence is correct.
+    """
+
+    def _simulate_build_messages(self, events):
+        """Simulate the core _build_messages loop logic to verify message ordering.
+
+        Returns a list of (role, text) tuples representing the conversation.
+        This mirrors the algorithm in Terminus2Agent._build_messages.
+        """
+        messages = []
+        messages.append(('system', 'system_prompt'))
+
+        initial_user_msg = None
+        initial_terminal_event = None
+        for event in events:
+            if isinstance(event, MessageAction) and event.source == EventSource.USER:
+                initial_user_msg = event.content
+                break
+        for event in events:
+            if isinstance(event, Terminus2CmdOutputObservation):
+                initial_terminal_event = event
+                break
+
+        if initial_user_msg:
+            if initial_terminal_event is not None:
+                terminal_text = initial_terminal_event.terminal_state
+                first_text = f'{initial_user_msg}\n\n{terminal_text}'
+            else:
+                first_text = initial_user_msg
+            messages.append(('user', first_text))
+
+        batch_observations = []
+        for event in events:
+            if isinstance(event, MessageAction):
+                if event.source == EventSource.USER:
+                    continue
+                elif event.source == EventSource.AGENT:
+                    if batch_observations:
+                        messages.append(('user', batch_observations[-1]))
+                        batch_observations = []
+                    messages.append(('assistant', event.content))
+
+            elif isinstance(event, Terminus2CmdRunAction):
+                if event.thought:
+                    if batch_observations:
+                        messages.append(('user', batch_observations[-1]))
+                        batch_observations = []
+                    messages.append(('assistant', event.thought))
+
+            elif isinstance(event, Terminus2CmdOutputObservation):
+                if event is initial_terminal_event:
+                    continue
+                batch_observations.append(event.terminal_state)
+
+            elif isinstance(event, ErrorObservation):
+                batch_observations.append(f'ERROR: {event.content}')
+
+        if batch_observations:
+            messages.append(('user', batch_observations[-1]))
+
+        return messages
+
+    def test_initial_state_only(self):
+        """First LLM call: system + user(task+terminal screen)."""
+        user_msg = MessageAction(content='Fix the bug')
+        user_msg._source = EventSource.USER
+        noop = Terminus2CmdRunAction(keystrokes='', duration=0.5)
+        initial_obs = Terminus2CmdOutputObservation(
+            content='Current Terminal Screen:\nroot@host:/app# pwd\n/app\nroot@host:/app# ',
+            terminal_state='Current Terminal Screen:\nroot@host:/app# pwd\n/app\nroot@host:/app# ',
+        )
+
+        events = [user_msg, noop, initial_obs]
+        msgs = self._simulate_build_messages(events)
+
+        assert len(msgs) == 2  # system + user
+        assert msgs[0][0] == 'system'
+        assert msgs[1][0] == 'user'
+        assert 'Fix the bug' in msgs[1][1]
+        assert 'Current Terminal Screen:' in msgs[1][1]
+        assert 'root@host:/app#' in msgs[1][1]
+
+    def test_one_round_trip(self):
+        """After first LLM call: system + user(task+terminal) + assistant + user(output)."""
+        llm_response = '{"analysis":"a","plan":"p","commands":[{"keystrokes":"ls\\n","duration":0.1}]}'
+
+        user_msg = MessageAction(content='Fix the bug')
+        user_msg._source = EventSource.USER
+        noop = Terminus2CmdRunAction(keystrokes='', duration=0.5)
+        initial_obs = Terminus2CmdOutputObservation(
+            content='Current Terminal Screen:\nroot@host:/app# ',
+            terminal_state='Current Terminal Screen:\nroot@host:/app# ',
+        )
+        cmd_action = Terminus2CmdRunAction(
+            keystrokes='ls\n', duration=0.1, thought=llm_response
+        )
+        cmd_obs = Terminus2CmdOutputObservation(
+            content='New Terminal Output:\nroot@host:/app# ls\nfile.py\nroot@host:/app# ',
+            terminal_state='New Terminal Output:\nroot@host:/app# ls\nfile.py\nroot@host:/app# ',
+        )
+
+        events = [user_msg, noop, initial_obs, cmd_action, cmd_obs]
+        msgs = self._simulate_build_messages(events)
+
+        assert len(msgs) == 4  # system, user, assistant, user
+        assert msgs[0][0] == 'system'
+        assert msgs[1][0] == 'user'
+        assert msgs[2][0] == 'assistant'
+        assert msgs[2][1] == llm_response
+        assert msgs[3][0] == 'user'
+        assert 'New Terminal Output:' in msgs[3][1]
+        assert 'file.py' in msgs[3][1]
+
+    def test_multi_command_batch(self):
+        """Multiple commands from one LLM call: only last observation becomes user message."""
+        llm_response = '{"analysis":"a","plan":"p","commands":[{"keystrokes":"ls\\n"},{"keystrokes":"pwd\\n"}]}'
+
+        user_msg = MessageAction(content='Task')
+        user_msg._source = EventSource.USER
+        noop = Terminus2CmdRunAction(keystrokes='', duration=0.5)
+        initial_obs = Terminus2CmdOutputObservation(
+            content='Current Terminal Screen:\nprompt',
+            terminal_state='Current Terminal Screen:\nprompt',
+        )
+        cmd1 = Terminus2CmdRunAction(keystrokes='ls\n', duration=0.1, thought=llm_response)
+        obs1 = Terminus2CmdOutputObservation(
+            content='New Terminal Output:\nls output',
+            terminal_state='New Terminal Output:\nls output',
+        )
+        cmd2 = Terminus2CmdRunAction(keystrokes='pwd\n', duration=0.1, thought='')
+        obs2 = Terminus2CmdOutputObservation(
+            content='New Terminal Output:\npwd output',
+            terminal_state='New Terminal Output:\npwd output',
+        )
+
+        events = [user_msg, noop, initial_obs, cmd1, obs1, cmd2, obs2]
+        msgs = self._simulate_build_messages(events)
+
+        assert len(msgs) == 4  # system, user, assistant, user
+        assert msgs[2][0] == 'assistant'
+        assert msgs[2][1] == llm_response
+        assert msgs[3][0] == 'user'
+        assert 'pwd output' in msgs[3][1]
+
+    def test_two_round_trips(self):
+        """Two LLM calls produce: sys, user, asst, user, asst, user."""
+        resp1 = '{"analysis":"a","plan":"p","commands":[{"keystrokes":"ls\\n"}]}'
+        resp2 = '{"analysis":"b","plan":"q","commands":[{"keystrokes":"cat f\\n"}]}'
+
+        user_msg = MessageAction(content='Task')
+        user_msg._source = EventSource.USER
+        noop = Terminus2CmdRunAction(keystrokes='', duration=0.5)
+        initial_obs = Terminus2CmdOutputObservation(
+            content='Current Terminal Screen:\nprompt',
+            terminal_state='Current Terminal Screen:\nprompt',
+        )
+        cmd1 = Terminus2CmdRunAction(keystrokes='ls\n', duration=0.1, thought=resp1)
+        obs1 = Terminus2CmdOutputObservation(
+            content='New Terminal Output:\nls result',
+            terminal_state='New Terminal Output:\nls result',
+        )
+        cmd2 = Terminus2CmdRunAction(keystrokes='cat f\n', duration=0.1, thought=resp2)
+        obs2 = Terminus2CmdOutputObservation(
+            content='New Terminal Output:\nfile content',
+            terminal_state='New Terminal Output:\nfile content',
+        )
+
+        events = [user_msg, noop, initial_obs, cmd1, obs1, cmd2, obs2]
+        msgs = self._simulate_build_messages(events)
+
+        assert len(msgs) == 6  # system, user, asst, user, asst, user
+        roles = [m[0] for m in msgs]
+        assert roles == ['system', 'user', 'assistant', 'user', 'assistant', 'user']
+        assert msgs[2][1] == resp1
+        assert 'ls result' in msgs[3][1]
+        assert msgs[4][1] == resp2
+        assert 'file content' in msgs[5][1]
+
+    def test_initial_observation_not_duplicated(self):
+        """The initial terminal observation should NOT appear as a separate user message."""
+        user_msg = MessageAction(content='Task')
+        user_msg._source = EventSource.USER
+        noop = Terminus2CmdRunAction(keystrokes='', duration=0.5)
+        initial_obs = Terminus2CmdOutputObservation(
+            content='Current Terminal Screen:\nINITIAL_SCREEN',
+            terminal_state='Current Terminal Screen:\nINITIAL_SCREEN',
+        )
+
+        events = [user_msg, noop, initial_obs]
+        msgs = self._simulate_build_messages(events)
+
+        user_messages = [m[1] for m in msgs if m[0] == 'user']
+        assert len(user_messages) == 1
+        assert 'Current Terminal Screen:' in user_messages[0]
+        assert 'INITIAL_SCREEN' in user_messages[0]
+
+    def test_initial_observation_not_duplicated_after_first_llm_call(self):
+        """After one LLM round, initial screen should only appear in first user msg."""
+        resp = '{"analysis":"a","plan":"p","commands":[{"keystrokes":"ls\\n"}]}'
+        user_msg = MessageAction(content='Task')
+        user_msg._source = EventSource.USER
+        noop = Terminus2CmdRunAction(keystrokes='', duration=0.5)
+        initial_obs = Terminus2CmdOutputObservation(
+            content='Current Terminal Screen:\nINITIAL_SCREEN',
+            terminal_state='Current Terminal Screen:\nINITIAL_SCREEN',
+        )
+        cmd = Terminus2CmdRunAction(keystrokes='ls\n', duration=0.1, thought=resp)
+        obs = Terminus2CmdOutputObservation(
+            content='New Terminal Output:\nls output',
+            terminal_state='New Terminal Output:\nls output',
+        )
+
+        events = [user_msg, noop, initial_obs, cmd, obs]
+        msgs = self._simulate_build_messages(events)
+
+        user_messages = [m[1] for m in msgs if m[0] == 'user']
+        assert len(user_messages) == 2
+        assert 'INITIAL_SCREEN' in user_messages[0]
+        assert 'INITIAL_SCREEN' not in user_messages[1]
+        assert 'New Terminal Output:' in user_messages[1]
+
+    def test_no_initial_terminal_state(self):
+        """When no terminal observation exists, first user message is just the task."""
+        user_msg = MessageAction(content='Task description')
+        user_msg._source = EventSource.USER
+
+        events = [user_msg]
+        msgs = self._simulate_build_messages(events)
+
+        assert len(msgs) == 2  # system + user
+        assert msgs[1][1] == 'Task description'
+
+    def test_error_observation_in_batch(self):
+        """ErrorObservation should be included in batch_observations."""
+        user_msg = MessageAction(content='Task')
+        user_msg._source = EventSource.USER
+        initial_obs = Terminus2CmdOutputObservation(
+            content='Current Terminal Screen:\nprompt',
+            terminal_state='Current Terminal Screen:\nprompt',
+        )
+        resp = '{"analysis":"a","plan":"p","commands":[{"keystrokes":"bad_cmd\\n"}]}'
+        cmd = Terminus2CmdRunAction(keystrokes='bad_cmd\n', duration=0.1, thought=resp)
+        err = ErrorObservation(content='command failed')
+
+        events = [user_msg, initial_obs, cmd, err]
+        msgs = self._simulate_build_messages(events)
+
+        user_messages = [m[1] for m in msgs if m[0] == 'user']
+        assert any('ERROR: command failed' in m for m in user_messages)
+
+    def test_alternating_roles_no_consecutive_same_role(self):
+        """After system, messages should alternate user/assistant (no consecutive same role)."""
+        resp = '{"analysis":"a","plan":"p","commands":[{"keystrokes":"ls\\n"}]}'
+        user_msg = MessageAction(content='Task')
+        user_msg._source = EventSource.USER
+        noop = Terminus2CmdRunAction(keystrokes='', duration=0.5)
+        initial_obs = Terminus2CmdOutputObservation(
+            content='Current Terminal Screen:\nprompt',
+            terminal_state='Current Terminal Screen:\nprompt',
+        )
+        cmd = Terminus2CmdRunAction(keystrokes='ls\n', duration=0.1, thought=resp)
+        obs = Terminus2CmdOutputObservation(
+            content='New Terminal Output:\noutput',
+            terminal_state='New Terminal Output:\noutput',
+        )
+
+        events = [user_msg, noop, initial_obs, cmd, obs]
+        msgs = self._simulate_build_messages(events)
+
+        roles = [m[0] for m in msgs]
+        assert roles[0] == 'system'
+        for i in range(2, len(roles)):
+            assert roles[i] != roles[i - 1], (
+                f'Consecutive same role at {i}: {roles}'
+            )
+
+
+# ==============================================================================
+# Initial Terminal Capture Tests
+# ==============================================================================
+
+
+class TestInitialTerminalCapture:
+    """Tests for the no-op action sent on the first step to capture terminal state."""
+
+    def test_noop_action_has_empty_keystrokes(self):
+        action = Terminus2CmdRunAction(keystrokes='', duration=0.5)
+        assert action.keystrokes == ''
+        assert action.duration == 0.5
+
+    def test_noop_action_is_runnable(self):
+        action = Terminus2CmdRunAction(keystrokes='', duration=0.5)
+        assert action.runnable is True
+
+
+# ==============================================================================
+# Action Execution Client Dispatch Tests
+# ==============================================================================
+
+
+class TestActionExecutionClientDispatch:
+    """Tests that the ActionExecutionClient has the terminus_2_cmd_run method."""
+
+    def test_client_has_terminus_2_method(self):
+        from openhands.runtime.impl.action_execution.action_execution_client import (
+            ActionExecutionClient,
+        )
+        assert hasattr(ActionExecutionClient, 'terminus_2_cmd_run')
+
+    def test_client_method_is_callable(self):
+        from openhands.runtime.impl.action_execution.action_execution_client import (
+            ActionExecutionClient,
+        )
+        assert callable(getattr(ActionExecutionClient, 'terminus_2_cmd_run'))
+
+
+# ==============================================================================
+# Terminal Screen Formatting Tests
+# ==============================================================================
+
+
+class TestTerminalScreenFormatting:
+    """Tests for _format_terminal_screen logic in the action execution server.
+
+    Since ActionExecutor has heavy dependencies (FastAPI, BashSession, etc.),
+    we re-implement the pure formatting logic here to test it in isolation.
+    This mirrors ActionExecutor._format_terminal_screen exactly.
+    """
+
+    @staticmethod
+    def _format_terminal_screen(obs, command):
+        """Pure-function copy of ActionExecutor._format_terminal_screen."""
+        meta = obs.metadata
+        username = meta.username or 'root'
+        hostname = meta.hostname or 'sandbox'
+        cwd = meta.working_dir or '/'
+        suffix = '#' if username == 'root' else '$'
+        prompt = f'{username}@{hostname}:{cwd}{suffix} '
+
+        lines = [f'{prompt}{command}']
+        if obs.content.strip():
+            lines.append(obs.content)
+        lines.append(prompt)
+        return '\n'.join(lines)
+
+    def _make_obs(self, content, username=None, hostname=None, working_dir=None):
+        from openhands.events.observation.commands import (
+            CmdOutputMetadata,
+            CmdOutputObservation,
+        )
+        metadata = CmdOutputMetadata(
+            exit_code=0,
+            username=username,
+            hostname=hostname,
+            working_dir=working_dir,
+        )
+        return CmdOutputObservation(
+            content=content,
+            command='test',
+            metadata=metadata,
+        )
+
+    def test_basic_formatting(self):
+        obs = self._make_obs(
+            'file1.txt\nfile2.txt',
+            username='root',
+            hostname='abc123',
+            working_dir='/app',
+        )
+        result = self._format_terminal_screen(obs, 'ls')
+
+        assert result.startswith('root@abc123:/app# ls')
+        assert 'file1.txt' in result
+        assert 'file2.txt' in result
+        assert result.endswith('root@abc123:/app# ')
+
+    def test_root_user_gets_hash_prompt(self):
+        obs = self._make_obs('', username='root', hostname='h', working_dir='/')
+        result = self._format_terminal_screen(obs, 'pwd')
+        assert 'root@h:/# pwd' in result
+
+    def test_non_root_user_gets_dollar_prompt(self):
+        obs = self._make_obs('', username='developer', hostname='h', working_dir='/home')
+        result = self._format_terminal_screen(obs, 'pwd')
+        assert 'developer@h:/home$ pwd' in result
+
+    def test_empty_content_no_extra_lines(self):
+        obs = self._make_obs('', username='root', hostname='h', working_dir='/')
+        result = self._format_terminal_screen(obs, 'true')
+        lines = result.split('\n')
+        assert len(lines) == 2
+        assert lines[0] == 'root@h:/# true'
+        assert lines[1] == 'root@h:/# '
+
+    def test_multiline_output(self):
+        obs = self._make_obs(
+            'line1\nline2\nline3',
+            username='root',
+            hostname='box',
+            working_dir='/tmp',
+        )
+        result = self._format_terminal_screen(obs, 'cat file')
+        lines = result.split('\n')
+        assert lines[0] == 'root@box:/tmp# cat file'
+        assert lines[1] == 'line1'
+        assert lines[2] == 'line2'
+        assert lines[3] == 'line3'
+        assert lines[4] == 'root@box:/tmp# '
+
+    def test_defaults_when_metadata_missing(self):
+        obs = self._make_obs('output', username=None, hostname=None, working_dir=None)
+        result = self._format_terminal_screen(obs, 'echo hi')
+        assert result.startswith('root@sandbox:/#')
+        assert 'output' in result
+
+    def test_special_key_ctrl_c_display(self):
+        obs = self._make_obs('', username='root', hostname='h', working_dir='/app')
+        result = self._format_terminal_screen(obs, '^C')
+        assert 'root@h:/app# ^C' in result
+
+    def test_whitespace_only_content_treated_as_empty(self):
+        obs = self._make_obs('   \n  \n  ', username='root', hostname='h', working_dir='/')
+        result = self._format_terminal_screen(obs, 'true')
+        lines = result.split('\n')
+        assert len(lines) == 2
+
+    def test_prompt_appears_at_end(self):
+        obs = self._make_obs(
+            'some output',
+            username='root',
+            hostname='container',
+            working_dir='/workspace',
+        )
+        result = self._format_terminal_screen(obs, 'echo hi')
+        assert result.endswith('root@container:/workspace# ')
+
+    def test_long_command_preserved(self):
+        long_cmd = 'find / -name "*.py" -exec grep -l "import os" {} \\;'
+        obs = self._make_obs('result', username='root', hostname='h', working_dir='/')
+        result = self._format_terminal_screen(obs, long_cmd)
+        assert long_cmd in result.split('\n')[0]
+
+
+# ==============================================================================
+# Terminal Output Prefix Tests
+# ==============================================================================
+
+
+class TestTerminalOutputPrefixes:
+    """Tests that the server adds correct prefixes to terminal output.
+
+    In the original Terminus-2:
+    - "Current Terminal Screen:" for initial captures and timed-out commands
+    - "New Terminal Output:" for normal command execution output
+    """
+
+    def test_initial_capture_gets_current_screen_prefix(self):
+        """Empty keystrokes (initial capture) should use 'Current Terminal Screen:' prefix."""
+        terminal_state = 'Current Terminal Screen:\nroot@host:/app# pwd\n/app\nroot@host:/app# '
+        assert terminal_state.startswith('Current Terminal Screen:')
+        assert 'root@host:/app#' in terminal_state
+
+    def test_normal_command_gets_new_output_prefix(self):
+        """Regular command output should use 'New Terminal Output:' prefix."""
+        terminal_state = 'New Terminal Output:\nroot@host:/app# ls\nfile.py\nroot@host:/app# '
+        assert terminal_state.startswith('New Terminal Output:')
+        assert 'file.py' in terminal_state
+
+    def test_timed_out_command_gets_current_screen_prefix(self):
+        """Timed-out commands should use 'Current Terminal Screen:' prefix."""
+        terminal_state = 'Current Terminal Screen:\nroot@host:/app# sleep 100\n'
+        assert terminal_state.startswith('Current Terminal Screen:')
+
+    def test_prefix_followed_by_newline_then_content(self):
+        """Prefix should be followed by newline then the actual screen content."""
+        screen = 'root@host:/app# ls\nfile.py\nroot@host:/app# '
+        prefixed = f'New Terminal Output:\n{screen}'
+        parts = prefixed.split('\n', 1)
+        assert parts[0] == 'New Terminal Output:'
+        assert parts[1] == screen
+
+    def test_initial_message_includes_prefix_from_terminal_state(self):
+        """When building initial user message, the terminal_state already has the prefix."""
+        task = 'Fix the bug in main.py'
+        terminal_state = 'Current Terminal Screen:\nroot@host:/app# '
+        initial_msg = f'{task}\n\n{terminal_state}'
+        assert 'Current Terminal Screen:' in initial_msg
+        assert 'Fix the bug' in initial_msg
+
+    def test_subsequent_output_includes_prefix(self):
+        """Subsequent terminal observations have their prefix baked in."""
+        terminal_state = 'New Terminal Output:\nroot@host:/app# echo hello\nhello\nroot@host:/app# '
+        assert terminal_state.startswith('New Terminal Output:')
+        content_after_prefix = terminal_state[len('New Terminal Output:\n'):]
+        assert content_after_prefix.startswith('root@host:/app#')

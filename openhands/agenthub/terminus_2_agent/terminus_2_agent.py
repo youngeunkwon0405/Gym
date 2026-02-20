@@ -202,10 +202,8 @@ class Terminus2Agent(Agent):
 
         if initial_user_msg:
             if initial_terminal_event is not None:
-                first_user_text = (
-                    f'{initial_user_msg}\n\n'
-                    f'Current terminal state:\n{initial_terminal_event.terminal_state}'
-                )
+                terminal_text = initial_terminal_event.terminal_state
+                first_user_text = f'{initial_user_msg}\n\n{terminal_text}'
             else:
                 first_user_text = initial_user_msg
             messages.append(
