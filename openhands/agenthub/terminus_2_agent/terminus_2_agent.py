@@ -119,8 +119,17 @@ class Terminus2Agent(Agent):
         self._conversation_messages = []
         self._needs_llm_call = True
 
+    def _has_terminal_observation(self, events: list[Event]) -> bool:
+        """Check if any Terminus2CmdOutputObservation exists in the event history."""
+        return any(isinstance(e, Terminus2CmdOutputObservation) for e in events)
+
     def step(self, state: State) -> 'Action':
         """Performs one step of the Terminus-2 agent.
+
+        On the very first step (before any terminal observations exist), sends a
+        no-op action to capture the initial terminal screen. This mirrors the
+        original Terminus-2 behavior of capturing tmux state before the first
+        LLM call.
 
         Returns pending actions from the queue, or calls the LLM to get
         new commands when the queue is empty.
@@ -138,6 +147,9 @@ class Terminus2Agent(Agent):
                 condensed_history = events
             case Condensation(action=condensation_action):
                 return condensation_action
+
+        if not self._has_terminal_observation(condensed_history):
+            return Terminus2CmdRunAction(keystrokes='', duration=0.5)
 
         messages = self._build_messages(condensed_history, state)
 
