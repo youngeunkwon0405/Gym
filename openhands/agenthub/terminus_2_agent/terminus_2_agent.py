@@ -87,6 +87,10 @@ class Terminus2Agent(Agent):
         self.condenser = Condenser.from_config(self.config.condenser, llm_registry)
         self.llm = self.llm_registry.get_router(self.config)
 
+        from openhands.agenthub.nemo_gym_client import NemoGymClient
+
+        self.nemo_gym_client = NemoGymClient(self.llm)
+
     @property
     def prompt_manager(self) -> PromptManager:
         if self._prompt_manager is None:
@@ -123,7 +127,7 @@ class Terminus2Agent(Agent):
         """Check if any Terminus2CmdOutputObservation exists in the event history."""
         return any(isinstance(e, Terminus2CmdOutputObservation) for e in events)
 
-    def step(self, state: State) -> 'Action':
+    async def step(self, state: State) -> 'Action':
         """Performs one step of the Terminus-2 agent.
 
         On the very first step (before any terminal observations exist), sends a
@@ -153,7 +157,7 @@ class Terminus2Agent(Agent):
 
         messages = self._build_messages(condensed_history, state)
 
-        commands, is_task_complete, response_text = self._call_llm_and_parse(messages)
+        commands, is_task_complete, response_text = await self._call_llm_and_parse(messages)
 
         if is_task_complete:
             if self._pending_completion:
@@ -367,7 +371,7 @@ class Terminus2Agent(Agent):
             )
         return self._limit_output_length(terminal_output)
 
-    def _call_llm_and_parse(
+    async def _call_llm_and_parse(
         self, messages: list[Message]
     ) -> tuple[list[ParsedCommand], bool, str]:
         """Call the LLM and parse the JSON response, with retry on parse errors.
@@ -377,10 +381,7 @@ class Terminus2Agent(Agent):
         field so _build_messages can reconstruct the assistant turn later.
         """
         for attempt in range(MAX_LLM_RETRY):
-            params: dict = {
-                'messages': messages,
-            }
-            response = self.llm.completion(**params)
+            response = await self.nemo_gym_client.model_call(messages)
 
             response_text = response.choices[0].message.content or ''
             logger.debug(f'Terminus-2 LLM response (attempt {attempt + 1}): {response_text[:200]}...')

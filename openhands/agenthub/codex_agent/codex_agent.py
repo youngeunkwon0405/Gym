@@ -77,6 +77,10 @@ class CodexAgent(Agent):
         # Override with router if needed
         self.llm = self.llm_registry.get_router(self.config)
 
+        from openhands.agenthub.nemo_gym_client import NemoGymClient
+
+        self.nemo_gym_client = NemoGymClient(self.llm)
+
     @property
     def prompt_manager(self) -> PromptManager:
         if self._prompt_manager is None:
@@ -130,7 +134,7 @@ class CodexAgent(Agent):
         super().reset()
         self.pending_actions.clear()
 
-    def step(self, state: State) -> "Action":
+    async def step(self, state: State) -> "Action":
         """Performs one step using the Codex Agent.
 
         This includes gathering info on previous steps and prompting the model
@@ -175,7 +179,7 @@ class CodexAgent(Agent):
                 model_name=self.llm.config.model, agent_name=self.name
             )
         }
-        response = self.llm.completion(**params)
+        response = await self.nemo_gym_client.model_call(messages, params["tools"])
         logger.debug(f"Response from LLM: {response}")
         actions = self.response_to_actions(response)
         logger.debug(f"Actions after response_to_actions: {actions}")
