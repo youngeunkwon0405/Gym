@@ -39,6 +39,7 @@ from openhands.events.action.codex import (
     CodexReadFileAction,
     CodexUpdatePlanAction,
 )
+from openhands.events.action.terminus_2 import Terminus2CmdRunAction
 from openhands.events.action.message import SystemMessageAction
 from openhands.events.event import Event, RecallType
 from openhands.events.observation import (
@@ -64,6 +65,7 @@ from openhands.events.observation.codex import (
     CodexApplyPatchObservation,
     CodexUpdatePlanObservation,
 )
+from openhands.events.observation.terminus_2 import Terminus2CmdOutputObservation
 from openhands.events.observation.agent import (
     MicroagentKnowledge,
     RecallObservation,
@@ -275,6 +277,8 @@ class ConversationMemory:
                 CodexGrepFilesAction,
                 CodexApplyPatchAction,
                 CodexUpdatePlanAction,
+                # Terminus-2-style actions
+                Terminus2CmdRunAction,
             ),
         ) or (isinstance(action, CmdRunAction) and action.source == 'agent'):
             tool_metadata = action.tool_call_metadata
@@ -620,6 +624,11 @@ class ConversationMemory:
             message = Message(role='user', content=[TextContent(text=text)])
         elif isinstance(obs, CodexUpdatePlanObservation):
             text = truncate_content(obs.content, max_message_chars)
+            message = Message(role='user', content=[TextContent(text=text)])
+        elif isinstance(obs, Terminus2CmdOutputObservation):
+            text = truncate_content(
+                obs.terminal_state or obs.content, max_message_chars
+            )
             message = Message(role='user', content=[TextContent(text=text)])
         elif isinstance(obs, LoopDetectionObservation):
             # LoopRecovery should not be observed by llm, handled internally.

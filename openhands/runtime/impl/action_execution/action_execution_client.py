@@ -52,6 +52,7 @@ from openhands.events.action.codex import (
 from openhands.events.action.action import Action
 from openhands.events.action.files import FileEditSource
 from openhands.events.action.mcp import MCPAction
+from openhands.events.action.terminus_2 import Terminus2CmdRunAction
 from openhands.events.observation import (
     AgentThinkObservation,
     ErrorObservation,
@@ -436,6 +437,9 @@ class ActionExecutionClient(Runtime):
         return self.send_action_for_execution(action)
 
     def codex_update_plan(self, action: CodexUpdatePlanAction) -> Observation:
+        return self.send_action_for_execution(action)
+
+    def terminus_2_cmd_run(self, action: Terminus2CmdRunAction) -> Observation:
         return self.send_action_for_execution(action)
 
     def get_mcp_config(

@@ -147,3 +147,7 @@ class ActionType(str, Enum):
 
     CODEX_UPDATE_PLAN = 'codex_update_plan'
     """Updates the task plan with steps and statuses."""
+
+    # Terminus-2-style actions
+    TERMINUS_2_CMD_RUN = 'terminus_2_cmd_run'
+    """Sends raw keystrokes to a terminal session and captures the resulting screen state."""

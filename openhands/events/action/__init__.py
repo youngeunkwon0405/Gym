@@ -42,6 +42,7 @@ from openhands.events.action.codex import (
     CodexReadFileAction,
     CodexUpdatePlanAction,
 )
+from openhands.events.action.terminus_2 import Terminus2CmdRunAction
 
 __all__ = [
     'Action',
@@ -83,4 +84,6 @@ __all__ = [
     'CodexGrepFilesAction',
     'CodexApplyPatchAction',
     'CodexUpdatePlanAction',
+    # Terminus-2-style actions
+    'Terminus2CmdRunAction',
 ]

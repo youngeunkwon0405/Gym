@@ -70,6 +70,7 @@ from openhands.events.action.codex import (
     CodexReadFileAction,
     CodexUpdatePlanAction,
 )
+from openhands.events.action.terminus_2 import Terminus2CmdRunAction
 from openhands.events.event import FileEditSource, FileReadSource
 from openhands.events.observation import (
     CmdOutputObservation,
@@ -91,6 +92,7 @@ from openhands.events.observation.codex import (
     CodexApplyPatchObservation,
     CodexUpdatePlanObservation,
 )
+from openhands.events.observation.terminus_2 import Terminus2CmdOutputObservation
 from openhands.events.serialization import event_from_dict, event_to_dict
 from openhands.runtime.browser import browse
 from openhands.runtime.browser.browser_env import BrowserEnv
@@ -2218,6 +2220,107 @@ class ActionExecutor:
         except Exception as e:
             logger.exception(f'Error updating plan: {e}')
             return ErrorObservation(f'Failed to update plan: {str(e)}')
+
+    def _format_terminal_screen(
+        self, obs: CmdOutputObservation, command: str, pre_cwd: str | None = None
+    ) -> str:
+        """Format a CmdOutputObservation to look like a tmux capture-pane screen.
+
+        The pre-command prompt uses pre_cwd (the directory before execution),
+        and the post-command prompt uses the actual post-execution working_dir
+        from metadata. This matches real terminal behavior where e.g.
+        ``cd /app/src`` shows the old cwd before the command and the new cwd after.
+
+        Produces output like:
+            root@hostname:/app# cd /app/src
+            root@hostname:/app/src#
+        """
+        meta = obs.metadata
+        username = meta.username or 'root'
+        hostname = meta.hostname or 'sandbox'
+        post_cwd = meta.working_dir or '/'
+        suffix = '#' if username == 'root' else '$'
+
+        before_cwd = pre_cwd if pre_cwd else post_cwd
+        pre_prompt = f'{username}@{hostname}:{before_cwd}{suffix} '
+        post_prompt = f'{username}@{hostname}:{post_cwd}{suffix} '
+
+        lines = [f'{pre_prompt}{command}']
+        if obs.content.strip():
+            lines.append(obs.content)
+        lines.append(post_prompt)
+        return '\n'.join(lines)
+
+    async def terminus_2_cmd_run(
+        self, action: Terminus2CmdRunAction
+    ) -> Terminus2CmdOutputObservation | ErrorObservation:
+        """Execute Terminus-2 keystroke action via BashSession.
+
+        Converts keystrokes to a command, executes via the bash session,
+        and returns terminal output formatted like the original Terminus-2
+        tmux capture with appropriate prefix:
+        - "Current Terminal Screen:" for initial captures (empty keystrokes)
+          and timed-out commands
+        - "New Terminal Output:" for normal command output
+        """
+        try:
+            bash_session = self.bash_session
+            assert bash_session is not None
+
+            keystrokes = action.keystrokes
+            duration = min(action.duration, 60)
+            pre_cwd = bash_session.cwd
+
+            if keystrokes == '' or keystrokes.strip() == '':
+                cmd_action = CmdRunAction(command='pwd')
+                cmd_action.set_hard_timeout(duration + 5, blocking=False)
+                obs = await call_sync_from_async(bash_session.execute, cmd_action)
+                screen = self._format_terminal_screen(obs, 'pwd', pre_cwd)
+                terminal_state = f'Current Terminal Screen:\n{screen}'
+                return Terminus2CmdOutputObservation(
+                    content=terminal_state,
+                    terminal_state=terminal_state,
+                    timed_out=False,
+                    command_keystrokes=keystrokes,
+                )
+
+            if keystrokes.strip() in ('C-c', 'C-d'):
+                special_key = keystrokes.strip()
+                cmd_action = CmdRunAction(command=special_key)
+                cmd_action.set_hard_timeout(duration + 5, blocking=False)
+                obs = await call_sync_from_async(bash_session.execute, cmd_action)
+                screen = self._format_terminal_screen(obs, f'^{"C" if special_key == "C-c" else "D"}', pre_cwd)
+                terminal_state = f'New Terminal Output:\n{screen}'
+                return Terminus2CmdOutputObservation(
+                    content=terminal_state,
+                    terminal_state=terminal_state,
+                    timed_out=False,
+                    command_keystrokes=keystrokes,
+                )
+
+            command = keystrokes.rstrip('\n')
+            cmd_action = CmdRunAction(command=command)
+            cmd_action.set_hard_timeout(duration + 10, blocking=False)
+            obs = await call_sync_from_async(bash_session.execute, cmd_action)
+
+            timed_out = False
+            if hasattr(obs, 'metadata') and obs.metadata:
+                timed_out = getattr(obs.metadata, 'exit_code', 0) == -1
+
+            screen = self._format_terminal_screen(obs, command, pre_cwd)
+            if timed_out:
+                terminal_state = f'Current Terminal Screen:\n{screen}'
+            else:
+                terminal_state = f'New Terminal Output:\n{screen}'
+            return Terminus2CmdOutputObservation(
+                content=terminal_state,
+                terminal_state=terminal_state,
+                timed_out=timed_out,
+                command_keystrokes=keystrokes,
+            )
+        except Exception as e:
+            logger.exception(f'Error executing Terminus-2 keystrokes: {e}')
+            return ErrorObservation(str(e))
 
     async def browse(self, action: BrowseURLAction) -> Observation:
         if self.browser is None:

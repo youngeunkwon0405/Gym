@@ -36,6 +36,7 @@ from openhands.events.observation.codex import (
     CodexApplyPatchObservation,
     CodexUpdatePlanObservation,
 )
+from openhands.events.observation.terminus_2 import Terminus2CmdOutputObservation
 from openhands.events.observation.reject import UserRejectObservation
 from openhands.events.observation.success import SuccessObservation
 from openhands.events.observation.task_tracking import TaskTrackingObservation
@@ -71,4 +72,6 @@ __all__ = [
     # Codex-style observations
     'CodexApplyPatchObservation',
     'CodexUpdatePlanObservation',
+    # Terminus-2-style observations
+    'Terminus2CmdOutputObservation',
 ]
