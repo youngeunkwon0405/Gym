@@ -68,7 +68,7 @@ Notes:
 ApplyPatchTool = ChatCompletionToolParam(
     type='function',
     function=ChatCompletionToolParamFunctionChunk(
-        namexs=CODEX_APPLY_PATCH_TOOL_NAME,
+        name=CODEX_APPLY_PATCH_TOOL_NAME,
         description=_APPLY_PATCH_DESCRIPTION,
         parameters={
             "type": "object",
