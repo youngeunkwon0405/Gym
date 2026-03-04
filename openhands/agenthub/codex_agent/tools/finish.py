@@ -2,7 +2,7 @@ from litellm import ChatCompletionToolParam, ChatCompletionToolParamFunctionChun
 
 from openhands.llm.tool_names import FINISH_TOOL_NAME
 
-_FINISH_DESCRIPTION = """Use the finish tool to indicate that the task is complete.
+_FINISH_DESCRIPTION = f"""Use the {FINISH_TOOL_NAME} tool to indicate that the task is complete.
 Only call this when you are certain that you have completed the task and tested your work.
 """
 

@@ -1,6 +1,6 @@
 from litellm import ChatCompletionToolParam, ChatCompletionToolParamFunctionChunk
 
-QUESTION_TOOL_NAME = 'question'
+from openhands.llm.tool_names import QUESTION_TOOL_NAME
 
 _QUESTION_DESCRIPTION = """Use this tool when you need to ask the user questions during execution. This allows you to:
 1. Gather user preferences or requirements

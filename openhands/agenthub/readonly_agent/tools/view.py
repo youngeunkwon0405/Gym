@@ -1,5 +1,7 @@
 from litellm import ChatCompletionToolParam, ChatCompletionToolParamFunctionChunk
 
+from openhands.llm.tool_names import VIEW_TOOL_NAME
+
 _VIEW_DESCRIPTION = """Reads a file or list directories from the local filesystem.
 * The path parameter must be an absolute path, not a relative path.
 * If `path` is a file, `view` displays the result of applying `cat -n`; if `path` is a directory, `view` lists non-hidden files and directories up to 2 levels deep.
@@ -13,7 +15,7 @@ _VIEW_DESCRIPTION = """Reads a file or list directories from the local filesyste
 ViewTool = ChatCompletionToolParam(
     type='function',
     function=ChatCompletionToolParamFunctionChunk(
-        name='view',
+        name=VIEW_TOOL_NAME,
         description=_VIEW_DESCRIPTION,
         parameters={
             'type': 'object',

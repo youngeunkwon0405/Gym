@@ -1,5 +1,7 @@
 from litellm import ChatCompletionToolParam, ChatCompletionToolParamFunctionChunk
 
+from openhands.llm.tool_names import GLOB_TOOL_NAME
+
 _GLOB_DESCRIPTION = """Fast file pattern matching tool.
 * Supports glob patterns like "**/*.js" or "src/**/*.ts"
 * Use this tool when you need to find files by name patterns
@@ -11,7 +13,7 @@ _GLOB_DESCRIPTION = """Fast file pattern matching tool.
 GlobTool = ChatCompletionToolParam(
     type='function',
     function=ChatCompletionToolParamFunctionChunk(
-        name='glob',
+        name=GLOB_TOOL_NAME,
         description=_GLOB_DESCRIPTION,
         parameters={
             'type': 'object',

@@ -38,6 +38,7 @@ from openhands.llm.tool_names import (
     CODEX_READ_FILE_TOOL_NAME,
     CODEX_SHELL_COMMAND_TOOL_NAME,
     CODEX_UPDATE_PLAN_TOOL_NAME,
+    FINISH_TOOL_NAME,
 )
 
 
@@ -161,7 +162,6 @@ class TestToolDefinitions:
         assert ShellCommandTool['type'] == 'function'
         func = ShellCommandTool['function']
         assert func['name'] == CODEX_SHELL_COMMAND_TOOL_NAME
-        assert func['name'] == 'shell_command'
         params = func['parameters']
         assert 'command' in params['properties']
         assert 'workdir' in params['properties']
@@ -175,7 +175,6 @@ class TestToolDefinitions:
         assert ReadFileTool['type'] == 'function'
         func = ReadFileTool['function']
         assert func['name'] == CODEX_READ_FILE_TOOL_NAME
-        assert func['name'] == 'read_file'
         params = func['parameters']
         assert 'file_path' in params['properties']
         assert 'offset' in params['properties']
@@ -200,7 +199,6 @@ class TestToolDefinitions:
         assert ListDirTool['type'] == 'function'
         func = ListDirTool['function']
         assert func['name'] == CODEX_LIST_DIR_TOOL_NAME
-        assert func['name'] == 'list_dir'
         params = func['parameters']
         assert 'dir_path' in params['properties']
         assert 'offset' in params['properties']
@@ -213,7 +211,6 @@ class TestToolDefinitions:
         assert GrepFilesTool['type'] == 'function'
         func = GrepFilesTool['function']
         assert func['name'] == CODEX_GREP_FILES_TOOL_NAME
-        assert func['name'] == 'grep_files'
         params = func['parameters']
         assert 'pattern' in params['properties']
         assert 'include' in params['properties']
@@ -226,7 +223,6 @@ class TestToolDefinitions:
         assert ApplyPatchTool['type'] == 'function'
         func = ApplyPatchTool['function']
         assert func['name'] == CODEX_APPLY_PATCH_TOOL_NAME
-        assert func['name'] == 'apply_patch'
         params = func['parameters']
         assert 'input' in params['properties']
         assert params['required'] == ['input']
@@ -236,7 +232,6 @@ class TestToolDefinitions:
         assert UpdatePlanTool['type'] == 'function'
         func = UpdatePlanTool['function']
         assert func['name'] == CODEX_UPDATE_PLAN_TOOL_NAME
-        assert func['name'] == 'update_plan'
         params = func['parameters']
         assert 'plan' in params['properties']
         assert 'explanation' in params['properties']
@@ -254,7 +249,7 @@ class TestToolDefinitions:
         """Test FinishTool has correct schema structure."""
         assert FinishTool['type'] == 'function'
         func = FinishTool['function']
-        assert func['name'] == 'finish'
+        assert func['name'] == FINISH_TOOL_NAME
         assert 'message' in func['parameters']['properties']
 
 
@@ -268,7 +263,7 @@ class TestShellCommandFunctionCalling:
 
     def test_shell_command_valid_basic(self):
         """Test shell_command with just command."""
-        response = create_mock_response('shell_command', {'command': 'ls -la'})
+        response = create_mock_response(CODEX_SHELL_COMMAND_TOOL_NAME, {'command': 'ls -la'})
         actions = response_to_actions(response)
         assert len(actions) == 1
         assert isinstance(actions[0], CmdRunAction)
@@ -277,7 +272,7 @@ class TestShellCommandFunctionCalling:
     def test_shell_command_with_timeout(self):
         """Test shell_command converts timeout_ms to seconds."""
         response = create_mock_response(
-            'shell_command', {'command': 'sleep 5', 'timeout_ms': 10000}
+            CODEX_SHELL_COMMAND_TOOL_NAME, {'command': 'sleep 5', 'timeout_ms': 10000}
         )
         actions = response_to_actions(response)
         assert len(actions) == 1
@@ -287,7 +282,7 @@ class TestShellCommandFunctionCalling:
     def test_shell_command_timeout_capped_at_600(self):
         """Test shell_command timeout is capped at 600 seconds."""
         response = create_mock_response(
-            'shell_command', {'command': 'long_cmd', 'timeout_ms': 999999999}
+            CODEX_SHELL_COMMAND_TOOL_NAME, {'command': 'long_cmd', 'timeout_ms': 999999999}
         )
         actions = response_to_actions(response)
         assert len(actions) == 1
@@ -295,7 +290,7 @@ class TestShellCommandFunctionCalling:
 
     def test_shell_command_missing_command(self):
         """Test shell_command returns validation failure when command missing."""
-        response = create_mock_response('shell_command', {'workdir': '/tmp'})
+        response = create_mock_response(CODEX_SHELL_COMMAND_TOOL_NAME, {'workdir': '/tmp'})
         actions = response_to_actions(response)
         assert len(actions) == 1
         assert isinstance(actions[0], ValidationFailureAction)
@@ -303,7 +298,7 @@ class TestShellCommandFunctionCalling:
     def test_shell_command_with_thought(self):
         """Test shell_command preserves thought content."""
         response = create_mock_response_with_thought(
-            'shell_command', {'command': 'echo hello'}, 'Let me run this command'
+            CODEX_SHELL_COMMAND_TOOL_NAME, {'command': 'echo hello'}, 'Let me run this command'
         )
         actions = response_to_actions(response)
         assert len(actions) == 1
@@ -320,7 +315,7 @@ class TestReadFileFunctionCalling:
 
     def test_read_file_valid_basic(self):
         """Test read_file with just file_path."""
-        response = create_mock_response('read_file', {'file_path': '/path/to/file.py'})
+        response = create_mock_response(CODEX_READ_FILE_TOOL_NAME, {'file_path': '/path/to/file.py'})
         actions = response_to_actions(response)
         assert len(actions) == 1
         assert isinstance(actions[0], CodexReadFileAction)
@@ -333,7 +328,7 @@ class TestReadFileFunctionCalling:
     def test_read_file_with_offset(self):
         """Test read_file with offset parameter (1-indexed)."""
         response = create_mock_response(
-            'read_file', {'file_path': '/path/to/file.py', 'offset': 50}
+            CODEX_READ_FILE_TOOL_NAME, {'file_path': '/path/to/file.py', 'offset': 50}
         )
         actions = response_to_actions(response)
         assert len(actions) == 1
@@ -343,7 +338,7 @@ class TestReadFileFunctionCalling:
     def test_read_file_with_limit(self):
         """Test read_file with limit parameter."""
         response = create_mock_response(
-            'read_file', {'file_path': '/path/to/file.py', 'limit': 100}
+            CODEX_READ_FILE_TOOL_NAME, {'file_path': '/path/to/file.py', 'limit': 100}
         )
         actions = response_to_actions(response)
         assert len(actions) == 1
@@ -352,7 +347,7 @@ class TestReadFileFunctionCalling:
     def test_read_file_with_indentation_mode(self):
         """Test read_file with indentation mode and params."""
         response = create_mock_response(
-            'read_file',
+            CODEX_READ_FILE_TOOL_NAME,
             {
                 'file_path': '/path/to/file.py',
                 'mode': 'indentation',
@@ -375,7 +370,7 @@ class TestReadFileFunctionCalling:
 
     def test_read_file_missing_file_path(self):
         """Test read_file returns validation failure when file_path is missing."""
-        response = create_mock_response('read_file', {'offset': 10})
+        response = create_mock_response(CODEX_READ_FILE_TOOL_NAME, {'offset': 10})
         actions = response_to_actions(response)
         assert len(actions) == 1
         assert isinstance(actions[0], ValidationFailureAction)
@@ -383,7 +378,7 @@ class TestReadFileFunctionCalling:
     def test_read_file_with_thought(self):
         """Test read_file preserves thought content."""
         response = create_mock_response_with_thought(
-            'read_file', {'file_path': '/test.py'}, 'Let me read this file'
+            CODEX_READ_FILE_TOOL_NAME, {'file_path': '/test.py'}, 'Let me read this file'
         )
         actions = response_to_actions(response)
         assert len(actions) == 1
@@ -400,7 +395,7 @@ class TestListDirFunctionCalling:
 
     def test_list_dir_valid_basic(self):
         """Test list_dir with just dir_path."""
-        response = create_mock_response('list_dir', {'dir_path': '/workspace'})
+        response = create_mock_response(CODEX_LIST_DIR_TOOL_NAME, {'dir_path': '/workspace'})
         actions = response_to_actions(response)
         assert len(actions) == 1
         assert isinstance(actions[0], CodexListDirAction)
@@ -413,7 +408,7 @@ class TestListDirFunctionCalling:
     def test_list_dir_with_all_params(self):
         """Test list_dir with all parameters."""
         response = create_mock_response(
-            'list_dir',
+            CODEX_LIST_DIR_TOOL_NAME,
             {'dir_path': '/workspace', 'offset': 10, 'limit': 50, 'depth': 3},
         )
         actions = response_to_actions(response)
@@ -425,7 +420,7 @@ class TestListDirFunctionCalling:
 
     def test_list_dir_missing_dir_path(self):
         """Test list_dir returns validation failure when dir_path is missing."""
-        response = create_mock_response('list_dir', {'depth': 3})
+        response = create_mock_response(CODEX_LIST_DIR_TOOL_NAME, {'depth': 3})
         actions = response_to_actions(response)
         assert len(actions) == 1
         assert isinstance(actions[0], ValidationFailureAction)
@@ -441,7 +436,7 @@ class TestGrepFilesFunctionCalling:
 
     def test_grep_files_valid_basic(self):
         """Test grep_files with just pattern."""
-        response = create_mock_response('grep_files', {'pattern': 'TODO'})
+        response = create_mock_response(CODEX_GREP_FILES_TOOL_NAME, {'pattern': 'TODO'})
         actions = response_to_actions(response)
         assert len(actions) == 1
         assert isinstance(actions[0], CodexGrepFilesAction)
@@ -454,7 +449,7 @@ class TestGrepFilesFunctionCalling:
     def test_grep_files_with_all_params(self):
         """Test grep_files with all parameters."""
         response = create_mock_response(
-            'grep_files',
+            CODEX_GREP_FILES_TOOL_NAME,
             {'pattern': 'def \\w+', 'include': '*.py', 'path': '/workspace/src', 'limit': 50},
         )
         actions = response_to_actions(response)
@@ -467,7 +462,7 @@ class TestGrepFilesFunctionCalling:
 
     def test_grep_files_missing_pattern(self):
         """Test grep_files returns validation failure when pattern is missing."""
-        response = create_mock_response('grep_files', {'include': '*.py'})
+        response = create_mock_response(CODEX_GREP_FILES_TOOL_NAME, {'include': '*.py'})
         actions = response_to_actions(response)
         assert len(actions) == 1
         assert isinstance(actions[0], ValidationFailureAction)
@@ -492,7 +487,7 @@ class TestApplyPatchFunctionCalling:
             '+    print("new")\n'
             '*** End Patch'
         )
-        response = create_mock_response('apply_patch', {'input': patch})
+        response = create_mock_response(CODEX_APPLY_PATCH_TOOL_NAME, {'input': patch})
         actions = response_to_actions(response)
         assert len(actions) == 1
         assert isinstance(actions[0], CodexApplyPatchAction)
@@ -501,7 +496,7 @@ class TestApplyPatchFunctionCalling:
 
     def test_apply_patch_missing_input(self):
         """Test apply_patch returns validation failure when input is missing."""
-        response = create_mock_response('apply_patch', {})
+        response = create_mock_response(CODEX_APPLY_PATCH_TOOL_NAME, {})
         actions = response_to_actions(response)
         assert len(actions) == 1
         assert isinstance(actions[0], ValidationFailureAction)
@@ -515,7 +510,7 @@ class TestApplyPatchFunctionCalling:
             '+print("hello world")\n'
             '*** End Patch'
         )
-        response = create_mock_response('apply_patch', {'input': patch})
+        response = create_mock_response(CODEX_APPLY_PATCH_TOOL_NAME, {'input': patch})
         actions = response_to_actions(response)
         assert len(actions) == 1
         assert isinstance(actions[0], CodexApplyPatchAction)
@@ -528,7 +523,7 @@ class TestApplyPatchFunctionCalling:
             '+++ /dev/null\n'
             '*** End Patch'
         )
-        response = create_mock_response('apply_patch', {'input': patch})
+        response = create_mock_response(CODEX_APPLY_PATCH_TOOL_NAME, {'input': patch})
         actions = response_to_actions(response)
         assert len(actions) == 1
         assert isinstance(actions[0], CodexApplyPatchAction)
@@ -549,7 +544,7 @@ class TestUpdatePlanFunctionCalling:
             {'step': 'Implement feature', 'status': 'in_progress'},
             {'step': 'Write tests', 'status': 'pending'},
         ]
-        response = create_mock_response('update_plan', {'plan': plan})
+        response = create_mock_response(CODEX_UPDATE_PLAN_TOOL_NAME, {'plan': plan})
         actions = response_to_actions(response)
         assert len(actions) == 1
         assert isinstance(actions[0], CodexUpdatePlanAction)
@@ -561,7 +556,7 @@ class TestUpdatePlanFunctionCalling:
         """Test update_plan with explanation."""
         plan = [{'step': 'First step', 'status': 'pending'}]
         response = create_mock_response(
-            'update_plan', {'plan': plan, 'explanation': 'Starting work on the task'}
+            CODEX_UPDATE_PLAN_TOOL_NAME, {'plan': plan, 'explanation': 'Starting work on the task'}
         )
         actions = response_to_actions(response)
         assert len(actions) == 1
@@ -570,7 +565,7 @@ class TestUpdatePlanFunctionCalling:
 
     def test_update_plan_missing_plan(self):
         """Test update_plan returns validation failure when plan is missing."""
-        response = create_mock_response('update_plan', {'explanation': 'test'})
+        response = create_mock_response(CODEX_UPDATE_PLAN_TOOL_NAME, {'explanation': 'test'})
         actions = response_to_actions(response)
         assert len(actions) == 1
         assert isinstance(actions[0], ValidationFailureAction)
@@ -586,7 +581,7 @@ class TestFinishFunctionCalling:
 
     def test_finish_with_message(self):
         """Test finish with message."""
-        response = create_mock_response('finish', {'message': 'Task completed successfully'})
+        response = create_mock_response(FINISH_TOOL_NAME, {'message': 'Task completed successfully'})
         actions = response_to_actions(response)
         assert len(actions) == 1
         assert isinstance(actions[0], AgentFinishAction)
@@ -594,7 +589,7 @@ class TestFinishFunctionCalling:
 
     def test_finish_without_message(self):
         """Test finish without message."""
-        response = create_mock_response('finish', {})
+        response = create_mock_response(FINISH_TOOL_NAME, {})
         actions = response_to_actions(response)
         assert len(actions) == 1
         assert isinstance(actions[0], AgentFinishAction)
@@ -626,7 +621,7 @@ class TestEdgeCases:
                         'tool_calls': [
                             {
                                 'function': {
-                                    'name': 'read_file',
+                                    'name': CODEX_READ_FILE_TOOL_NAME,
                                     'arguments': '{invalid json',
                                 },
                                 'id': 'mock-tool-call-id',
@@ -677,8 +672,8 @@ class TestEdgeCases:
     def test_multiple_tool_calls(self):
         """Test response with multiple parallel tool calls."""
         response = create_mock_response_multi_tool([
-            ('read_file', {'file_path': '/file1.py'}),
-            ('grep_files', {'pattern': 'TODO'}),
+            (CODEX_READ_FILE_TOOL_NAME, {'file_path': '/file1.py'}),
+            (CODEX_GREP_FILES_TOOL_NAME, {'pattern': 'TODO'}),
         ])
         actions = response_to_actions(response)
         assert len(actions) == 2
@@ -695,7 +690,7 @@ class TestEdgeCases:
                         'tool_calls': [
                             {
                                 'function': {
-                                    'name': 'read_file',
+                                    'name': CODEX_READ_FILE_TOOL_NAME,
                                     'arguments': json.dumps({'file_path': '/file1.py'}),
                                 },
                                 'id': 'call-1',
@@ -703,7 +698,7 @@ class TestEdgeCases:
                             },
                             {
                                 'function': {
-                                    'name': 'read_file',
+                                    'name': CODEX_READ_FILE_TOOL_NAME,
                                     'arguments': json.dumps({'file_path': '/file2.py'}),
                                 },
                                 'id': 'call-2',
@@ -725,15 +720,15 @@ class TestEdgeCases:
 
     def test_tool_call_metadata_attached(self):
         """Test that ToolCallMetadata is attached to actions."""
-        response = create_mock_response('read_file', {'file_path': '/test.py'})
+        response = create_mock_response(CODEX_READ_FILE_TOOL_NAME, {'file_path': '/test.py'})
         actions = response_to_actions(response)
         assert len(actions) == 1
         assert actions[0].tool_call_metadata is not None
-        assert actions[0].tool_call_metadata.function_name == 'read_file'
+        assert actions[0].tool_call_metadata.function_name == CODEX_READ_FILE_TOOL_NAME
         assert actions[0].tool_call_metadata.tool_call_id == 'mock-tool-call-id'
 
     def test_response_id_attached(self):
         """Test that response ID is attached to actions."""
-        response = create_mock_response('read_file', {'file_path': '/test.py'})
+        response = create_mock_response(CODEX_READ_FILE_TOOL_NAME, {'file_path': '/test.py'})
         actions = response_to_actions(response)
         assert actions[0].response_id == 'mock-id'

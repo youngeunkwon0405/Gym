@@ -1,7 +1,6 @@
 from litellm import ChatCompletionToolParam, ChatCompletionToolParamFunctionChunk
 
-TODO_READ_TOOL_NAME = 'todo_read'
-TODO_WRITE_TOOL_NAME = 'todo_write'
+from openhands.llm.tool_names import TODO_READ_TOOL_NAME, TODO_WRITE_TOOL_NAME
 
 _TODO_READ_DESCRIPTION = """Use this tool to read your current todo list.
 

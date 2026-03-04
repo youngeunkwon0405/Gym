@@ -44,6 +44,15 @@ from openhands.events.observation.commands import (
 )
 from openhands.events.tool import ToolCallMetadata
 from openhands.llm.llm_registry import LLMRegistry
+from openhands.llm.tool_names import (
+    BROWSER_TOOL_NAME,
+    EXECUTE_BASH_TOOL_NAME,
+    FINISH_TOOL_NAME,
+    GLOB_TOOL_NAME,
+    GREP_TOOL_NAME,
+    LLM_BASED_EDIT_TOOL_NAME,
+    STR_REPLACE_EDITOR_TOOL_NAME,
+)
 from openhands.memory.condenser import View
 
 
@@ -87,11 +96,11 @@ def test_agent_with_default_config_has_default_tools(create_llm_registry):
     assert len(codeact_agent.tools) > 0
     default_tool_names = [tool['function']['name'] for tool in codeact_agent.tools]
     assert {
-        'browser',
-        'execute_bash',
+        BROWSER_TOOL_NAME,
+        EXECUTE_BASH_TOOL_NAME,
         'execute_ipython_cell',
-        'finish',
-        'str_replace_editor',
+        FINISH_TOOL_NAME,
+        STR_REPLACE_EDITOR_TOOL_NAME,
         'think',
     }.issubset(default_tool_names)
 
@@ -145,7 +154,7 @@ def test_step_with_pending_actions(agent):
 def test_cmd_run_tool():
     CmdRunTool = create_cmd_run_tool()
     assert CmdRunTool['type'] == 'function'
-    assert CmdRunTool['function']['name'] == 'execute_bash'
+    assert CmdRunTool['function']['name'] == EXECUTE_BASH_TOOL_NAME
     assert 'command' in CmdRunTool['function']['parameters']['properties']
     assert 'security_risk' in CmdRunTool['function']['parameters']['properties']
     assert CmdRunTool['function']['parameters']['required'] == [
@@ -167,7 +176,7 @@ def test_ipython_tool():
 
 def test_llm_based_file_edit_tool():
     assert LLMBasedFileEditTool['type'] == 'function'
-    assert LLMBasedFileEditTool['function']['name'] == 'edit_file'
+    assert LLMBasedFileEditTool['function']['name'] == LLM_BASED_EDIT_TOOL_NAME
 
     properties = LLMBasedFileEditTool['function']['parameters']['properties']
     assert 'path' in properties
@@ -186,7 +195,7 @@ def test_llm_based_file_edit_tool():
 def test_str_replace_editor_tool():
     StrReplaceEditorTool = create_str_replace_editor_tool()
     assert StrReplaceEditorTool['type'] == 'function'
-    assert StrReplaceEditorTool['function']['name'] == 'str_replace_editor'
+    assert StrReplaceEditorTool['function']['name'] == STR_REPLACE_EDITOR_TOOL_NAME
 
     properties = StrReplaceEditorTool['function']['parameters']['properties']
     assert 'command' in properties
@@ -206,7 +215,7 @@ def test_str_replace_editor_tool():
 
 def test_browser_tool():
     assert BrowserTool['type'] == 'function'
-    assert BrowserTool['function']['name'] == 'browser'
+    assert BrowserTool['function']['name'] == BROWSER_TOOL_NAME
     assert 'code' in BrowserTool['function']['parameters']['properties']
     assert 'security_risk' in BrowserTool['function']['parameters']['properties']
     assert BrowserTool['function']['parameters']['required'] == [
@@ -233,7 +242,7 @@ def test_browser_tool():
 
     # Test BrowserTool definition
     assert BrowserTool['type'] == 'function'
-    assert BrowserTool['function']['name'] == 'browser'
+    assert BrowserTool['function']['name'] == BROWSER_TOOL_NAME
     assert BrowserTool['function']['description'] == _BROWSER_DESCRIPTION
     assert BrowserTool['function']['parameters']['type'] == 'object'
     assert 'code' in BrowserTool['function']['parameters']['properties']
@@ -432,7 +441,7 @@ def test_mismatched_tool_call_events_and_auto_add_system_message(
 
 def test_grep_tool():
     assert GrepTool['type'] == 'function'
-    assert GrepTool['function']['name'] == 'grep'
+    assert GrepTool['function']['name'] == GREP_TOOL_NAME
 
     properties = GrepTool['function']['parameters']['properties']
     assert 'pattern' in properties
@@ -444,7 +453,7 @@ def test_grep_tool():
 
 def test_glob_tool():
     assert GlobTool['type'] == 'function'
-    assert GlobTool['function']['name'] == 'glob'
+    assert GlobTool['function']['name'] == GLOB_TOOL_NAME
 
     properties = GlobTool['function']['parameters']['properties']
     assert 'pattern' in properties
@@ -529,7 +538,7 @@ def test_get_system_message(create_llm_registry):
     assert isinstance(result, SystemMessageAction)
     assert 'You are OpenHands agent' in result.content
     assert len(result.tools) > 0
-    assert any(tool['function']['name'] == 'execute_bash' for tool in result.tools)
+    assert any(tool['function']['name'] == EXECUTE_BASH_TOOL_NAME for tool in result.tools)
     assert result._source == EventSource.AGENT
 
 

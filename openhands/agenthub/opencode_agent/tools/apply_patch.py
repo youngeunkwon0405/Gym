@@ -1,6 +1,8 @@
 from litellm import ChatCompletionToolParam, ChatCompletionToolParamFunctionChunk
 
-APPLY_PATCH_TOOL_NAME = 'apply_patch'
+from openhands.llm.tool_names import OPENCODE_APPLY_PATCH_TOOL_NAME
+
+APPLY_PATCH_TOOL_NAME = OPENCODE_APPLY_PATCH_TOOL_NAME
 
 _APPLY_PATCH_DESCRIPTION = """Applies a unified diff patch to modify multiple files in a single operation.
 

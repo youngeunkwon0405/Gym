@@ -2,11 +2,11 @@ from litellm import ChatCompletionToolParam, ChatCompletionToolParamFunctionChun
 
 from openhands.llm.tool_names import CODEX_APPLY_PATCH_TOOL_NAME
 
-_APPLY_PATCH_DESCRIPTION = r"""Use the apply_patch tool to edit files.
+_APPLY_PATCH_DESCRIPTION = f"""Use the {CODEX_APPLY_PATCH_TOOL_NAME} tool to edit files.
 
 It should be used whenever you want to create, edit, or delete a file.
 
-IMPORTANT: NEVER, EVER use apply_patch to write tests, test files, or any code that verifies behavior. Only use it for production code, configurations, and documentation.
+IMPORTANT: NEVER, EVER use {CODEX_APPLY_PATCH_TOOL_NAME} to write tests, test files, or any code that verifies behavior. Only use it for production code, configurations, and documentation.
 
 The patch format is a stripped-down, file-oriented diff format. The envelope is:
 
@@ -34,15 +34,15 @@ Context guidelines:
   @@ def my_method():
 
 The full grammar:
-Patch := Begin { FileOp } End
+Patch := Begin {{ FileOp }} End
 Begin := "*** Begin Patch" NEWLINE
 End := "*** End Patch" NEWLINE
 FileOp := AddFile | DeleteFile | UpdateFile
-AddFile := "*** Add File: " path NEWLINE { "+" line NEWLINE }
+AddFile := "*** Add File: " path NEWLINE {{ "+" line NEWLINE }}
 DeleteFile := "*** Delete File: " path NEWLINE
-UpdateFile := "*** Update File: " path NEWLINE [ MoveTo ] { Hunk }
+UpdateFile := "*** Update File: " path NEWLINE [ MoveTo ] {{ Hunk }}
 MoveTo := "*** Move to: " newPath NEWLINE
-Hunk := "@@" [ " " header ] NEWLINE { HunkLine } [ "*** End of File" NEWLINE ]
+Hunk := "@@" [ " " header ] NEWLINE {{ HunkLine }} [ "*** End of File" NEWLINE ]
 HunkLine := (" " | "-" | "+") text NEWLINE
 
 A full example combining several operations:
@@ -68,18 +68,18 @@ Notes:
 ApplyPatchTool = ChatCompletionToolParam(
     type='function',
     function=ChatCompletionToolParamFunctionChunk(
-        name=CODEX_APPLY_PATCH_TOOL_NAME,
+        namexs=CODEX_APPLY_PATCH_TOOL_NAME,
         description=_APPLY_PATCH_DESCRIPTION,
         parameters={
-            'type': 'object',
-            'required': ['input'],
-            'properties': {
-                'input': {
-                    'type': 'string',
-                    'description': 'The entire contents of the apply_patch command, including the *** Begin Patch and *** End Patch delimiters.',
+            "type": "object",
+            "required": ["input"],
+            "properties": {
+                "input": {
+                    "type": "string",
+                    "description": f"The entire contents of the {CODEX_APPLY_PATCH_TOOL_NAME} command, including the *** Begin Patch and *** End Patch delimiters.",
                 },
             },
-            'additionalProperties': False,
+            "additionalProperties": False,
         },
     ),
 )

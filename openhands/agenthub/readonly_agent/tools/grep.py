@@ -1,5 +1,7 @@
 from litellm import ChatCompletionToolParam, ChatCompletionToolParamFunctionChunk
 
+from openhands.llm.tool_names import GREP_TOOL_NAME
+
 _GREP_DESCRIPTION = """Fast content search tool.
 * Searches file contents using regular expressions
 * Supports full regex syntax (eg. "log.*Error", "function\\s+\\w+", etc.)
@@ -13,7 +15,7 @@ _GREP_DESCRIPTION = """Fast content search tool.
 GrepTool = ChatCompletionToolParam(
     type='function',
     function=ChatCompletionToolParamFunctionChunk(
-        name='grep',
+        name=GREP_TOOL_NAME,
         description=_GREP_DESCRIPTION,
         parameters={
             'type': 'object',

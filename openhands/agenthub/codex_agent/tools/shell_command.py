@@ -2,8 +2,8 @@ from litellm import ChatCompletionToolParam, ChatCompletionToolParamFunctionChun
 
 from openhands.llm.tool_names import CODEX_SHELL_COMMAND_TOOL_NAME
 
-_SHELL_COMMAND_DESCRIPTION = """Runs a shell command and returns its output.
-- Always set the `workdir` param when using the shell_command function. Do not use `cd` unless absolutely necessary."""
+_SHELL_COMMAND_DESCRIPTION = f"""Runs a shell command and returns its output.
+- Always set the `workdir` param when using the {CODEX_SHELL_COMMAND_TOOL_NAME} function. Do not use `cd` unless absolutely necessary."""
 
 ShellCommandTool = ChatCompletionToolParam(
     type='function',
