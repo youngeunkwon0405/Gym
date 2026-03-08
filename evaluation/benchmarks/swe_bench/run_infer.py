@@ -168,6 +168,8 @@ def set_dataset_type(dataset_name: str) -> str:
 
     if 'nv-internal-1' in name_lower:
         DATASET_TYPE = 'nv-internal-1'
+    elif 'swe-rebench-v2' in name_lower or 'swe-rebench_v2' in name_lower:
+        DATASET_TYPE = 'SWE-rebench-V2'
     elif 'swe-gym' in name_lower:
         DATASET_TYPE = 'SWE-Gym'
     elif 'r2e-gym' in name_lower:
@@ -293,7 +295,7 @@ def get_instance_docker_image(
             docker_image_prefix = 'docker.io/swebench/'
         elif DATASET_TYPE == 'SWE-rebench':
             docker_image_prefix = 'docker.io/swerebench/'
-        elif DATASET_TYPE in ['R2E-Gym', 'nv-internal-1']:
+        elif DATASET_TYPE in ['R2E-Gym', 'nv-internal-1', 'SWE-rebench-V2']:
             docker_image_prefix = 'UNAVAILABLE'
         repo, name = instance_id.split('__')
         image_name = f'{docker_image_prefix.rstrip("/")}/sweb.eval.x86_64.{repo}_1776_{name}:latest'.lower()
@@ -317,12 +319,15 @@ def get_config(
     metadata: EvalMetadata,
 ) -> OpenHandsConfig:
     # We use a different instance image for the each instance of swe-bench eval
-    use_swebench_official_image = DATASET_TYPE != 'SWE-Gym'
-
-    base_container_image = get_instance_docker_image(
-        instance['instance_id'],
-        swebench_official_image=use_swebench_official_image,
-    )
+    if DATASET_TYPE in ('SWE-rebench', 'SWE-rebench-V2'):
+        # SWE-rebench instances have their own image_name field
+        base_container_image = instance.get('image_name', '')
+    else:
+        use_swebench_official_image = DATASET_TYPE != 'SWE-Gym'
+        base_container_image = get_instance_docker_image(
+            instance['instance_id'],
+            swebench_official_image=use_swebench_official_image,
+        )
     logger.info(
         f'Using instance container image: {base_container_image}. '
         f'Please make sure this image exists. '
@@ -440,6 +445,8 @@ source ~/.bashrc
             entry_script_path = 'instance_swe_entry_rebench.sh'
         elif DATASET_TYPE == 'nv-internal-1':
             entry_script_path = 'instance_swe_entry_nv_internal.sh'
+        elif DATASET_TYPE == 'SWE-rebench-V2':
+            entry_script_path = 'instance_swe_entry_nv_internal.sh'
         elif DATASET_TYPE == 'R2E-Gym':
             entry_script_path = 'instance_swe_entry_r2e.sh'
         else:
@@ -449,8 +456,8 @@ source ~/.bashrc
             '/swe_util/',
         )
 
-    # nv-internal-1 instances operate directly out of /app instead of /workspace.
-    if DATASET_TYPE != 'nv-internal-1':
+    # nv-internal-1 and SWE-rebench-V2 instances operate directly in their repo dir.
+    if DATASET_TYPE not in ('nv-internal-1', 'SWE-rebench-V2'):
         action = CmdRunAction(command=f'source /swe_util/{entry_script_path}')
         action.set_hard_timeout(600)
         logger.info(action, extra={'msg_type': 'ACTION'})
@@ -460,7 +467,7 @@ source ~/.bashrc
             obs.exit_code == 0,
             f'Failed to source /swe_util/{entry_script_path}: {str(obs)}',
         )
-    elif instance.get("repo_language", "").lower() == "python":
+    elif instance.get("repo_language", instance.get("language", "")).lower() == "python":
         # change python to the base python in the container and not the OpenHands venv
         action = CmdRunAction(
             command=(
@@ -527,9 +534,9 @@ source ~/.bashrc
             obs = runtime.run_action(action)
             logger.info(obs, extra={'msg_type': 'OBSERVATION'})
 
-    if DATASET_TYPE not in ('Multimodal', 'SWE-bench-Live', 'nv-internal-1'):
+    if DATASET_TYPE not in ('Multimodal', 'SWE-bench-Live', 'nv-internal-1', 'SWE-rebench', 'SWE-rebench-V2'):
         # Only for non-multimodal datasets, we need to activate the testbed environment for Python
-        # SWE-Bench multimodal datasets, SWE-bench-Live, and nv-internal-1 are not using the testbed environment
+        # SWE-Bench multimodal datasets, SWE-bench-Live, nv-internal-1, and SWE-rebench are not using the testbed environment
         action = CmdRunAction(command='which python')
         action.set_hard_timeout(600)
         logger.info(action, extra={'msg_type': 'ACTION'})
@@ -554,6 +561,11 @@ def _get_workspace_path(
     if DATASET_TYPE == "nv-internal-1":
         # nv-internal-1 instances operate directly out of /app instead of /workspace.
         return "/app"
+    if DATASET_TYPE == "SWE-rebench-V2":
+        # SWE-rebench-V2 containers have repos directly at /{repo_name}
+        repo = instance.get("repo", "")
+        repo_name = repo.split("/")[1] if "/" in repo else repo
+        return f"/{repo_name}"
     return f"/workspace/{workspace_dir_name}"
 
 def complete_runtime(
@@ -1038,11 +1050,11 @@ if __name__ == '__main__':
         )
         profiler.start()
 
-    # Validate nv-internal-1 requires instance_dict_path
-    if 'nv-internal-1' in args.dataset.lower():
+    # Validate nv-internal-1 and SWE-rebench-V2 require instance_dict_path
+    if 'nv-internal-1' in args.dataset.lower() or 'swe-rebench-v2' in args.dataset.lower():
         if not args.instance_dict_path or not args.selected_id:
             raise ValueError(
-                'nv-internal-1 dataset requires both --instance-dict-path and --selected-id arguments. '
+                f'{args.dataset} dataset requires both --instance-dict-path and --selected-id arguments. '
                 'This dataset does not support HuggingFace dataset loading.'
             )
 

@@ -48,8 +48,7 @@ checkout_original_branch() {
 get_openhands_version() {
     # IMPORTANT: Because Agent's prompt changes fairly often in the rapidly evolving codebase of OpenHands
     # We need to track the version of Agent in the evaluation to make sure results are comparable
-    # Using the venv python directly instead of `poetry run` to avoid packaging.licenses
-    OPENHANDS_VERSION=v$($VIRTUAL_ENV/bin/python -c "from openhands import get_version; print(get_version())")
+    OPENHANDS_VERSION=v$(poetry run python -c "from openhands import get_version; print(get_version())")
 }
 
 
@@ -123,7 +122,6 @@ fi
 export RUN_WITH_BROWSING=$RUN_WITH_BROWSING
 echo "RUN_WITH_BROWSING: $RUN_WITH_BROWSING"
 
-#TODO: Hardcode the OpenHands version to v0.62.0 for now
 # get_openhands_version
 OPENHANDS_VERSION="v0.62.0"
 
@@ -175,7 +173,7 @@ fi
 
 function run_eval() {
   local eval_note="${1}"
-  COMMAND="$VIRTUAL_ENV/bin/python evaluation/benchmarks/swe_bench/run_infer.py \
+  COMMAND="poetry run python evaluation/benchmarks/swe_bench/run_infer.py \
     --agent-cls $AGENT \
     --llm-config $MODEL_CONFIG \
     --max-iterations $MAX_ITER \
