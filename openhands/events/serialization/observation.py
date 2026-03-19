@@ -6,8 +6,10 @@ from openhands.events.observation.agent import (
     AgentCondensationObservation,
     AgentStateChangedObservation,
     AgentThinkObservation,
+    FunctionCallNotExistsObservation,
     MicroagentKnowledge,
     RecallObservation,
+    ValidationFailureObservation,
 )
 from openhands.events.observation.browse import BrowserOutputObservation
 from openhands.events.observation.commands import (
@@ -64,6 +66,8 @@ observations = (
     FileDownloadObservation,
     TaskTrackingObservation,
     LoopDetectionObservation,
+    ValidationFailureObservation,
+    FunctionCallNotExistsObservation,
     QuestionObservation,
     ApplyPatchObservation,
     TodoReadObservation,

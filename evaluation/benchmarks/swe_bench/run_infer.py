@@ -2,6 +2,7 @@ import asyncio
 import copy
 import json
 import os
+import shutil
 import tempfile
 from typing import Any, Dict, Literal, Optional
 import time
@@ -782,6 +783,21 @@ def _has_existing_result(eval_output_dir: str, instance_id: str) -> tuple[bool, 
     return False, None
 
 
+def _cleanup_eval_sessions(sessions_dir: str, pre_existing: set[str]) -> None:
+    """Remove session directories created during a single eval run."""
+    if not os.path.isdir(sessions_dir):
+        return
+    try:
+        for entry in os.listdir(sessions_dir):
+            if entry not in pre_existing:
+                entry_path = os.path.join(sessions_dir, entry)
+                if os.path.isdir(entry_path):
+                    shutil.rmtree(entry_path, ignore_errors=True)
+                    logger.debug(f'Cleaned up eval session dir: {entry_path}')
+    except Exception as e:
+        logger.warning(f'Failed to clean up eval session files: {e}')
+
+
 def process_instance(
     instance: pd.Series,
     metadata: EvalMetadata,
@@ -853,6 +869,10 @@ def process_instance(
     update_metrics({"connect_to_runtime_time": end_time - start_time})
     print(f"connect to runtime: {end_time - start_time} seconds", flush = True)
 
+    # Snapshot existing session dirs so we can clean up the new one afterward
+    eval_sessions_dir = os.path.join(config.file_store_path, 'sessions')
+    pre_existing_sessions = set(os.listdir(eval_sessions_dir)) if os.path.isdir(eval_sessions_dir) else set()
+
     try:
         start_time = time.perf_counter()
         initialize_runtime(runtime, instance, metadata)
@@ -895,6 +915,7 @@ def process_instance(
         )
     finally:
         runtime.close()
+        _cleanup_eval_sessions(eval_sessions_dir, pre_existing_sessions)
     # ==========================================
 
     # ======= Attempt to evaluate the agent's edits =======

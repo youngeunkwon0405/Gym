@@ -38,6 +38,7 @@ from openhands.events.action import (
     IPythonRunCellAction,
     TaskTrackingAction,
     ValidationFailureAction,
+    FunctionCallNotExistsAction,
 )
 from openhands.events.action.mcp import MCPAction
 from openhands.events.event import Event
@@ -51,6 +52,7 @@ from openhands.events.observation import (
     TaskTrackingObservation,
     UserRejectObservation,
     ValidationFailureObservation,
+    FunctionCallNotExistsObservation,
 )
 from openhands.events.serialization.action import ACTION_TYPE_TO_CLASS
 from openhands.integrations.provider import (
@@ -986,6 +988,12 @@ fi
                 return AgentThinkObservation('Your thought has been logged.')
             elif isinstance(action, ValidationFailureAction):
                 return ValidationFailureObservation(
+                    content=action.error_message,
+                    function_name=action.function_name,
+                    error_message=action.error_message,
+                )
+            elif isinstance(action, FunctionCallNotExistsAction):
+                return FunctionCallNotExistsObservation(
                     content=action.error_message,
                     function_name=action.function_name,
                     error_message=action.error_message,

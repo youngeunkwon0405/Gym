@@ -30,6 +30,7 @@ from openhands.events.action import (
     FileWriteAction,
     IPythonRunCellAction,
     ValidationFailureAction,
+    FunctionCallNotExistsAction,
 )
 from openhands.events.action.opencode import (
     ApplyPatchAction,
@@ -60,6 +61,7 @@ from openhands.events.observation import (
     Observation,
     UserRejectObservation,
     ValidationFailureObservation,
+    FunctionCallNotExistsObservation,
 )
 from openhands.events.serialization import event_to_dict, observation_from_dict
 from openhands.events.serialization.action import ACTION_TYPE_TO_CLASS
@@ -314,6 +316,12 @@ class ActionExecutionClient(Runtime):
                     return AgentThinkObservation('Your thought has been logged.')
                 elif isinstance(action, ValidationFailureAction):
                     return ValidationFailureObservation(
+                        content=action.error_message,
+                        function_name=action.function_name,
+                        error_message=action.error_message,
+                    )
+                elif isinstance(action, FunctionCallNotExistsAction):
+                    return FunctionCallNotExistsObservation(
                         content=action.error_message,
                         function_name=action.function_name,
                         error_message=action.error_message,

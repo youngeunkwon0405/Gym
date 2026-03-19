@@ -64,6 +64,21 @@ class ValidationFailureObservation(Observation):
 
 
 @dataclass
+class FunctionCallNotExistsObservation(Observation):
+    """The output of a function call not exists error.
+
+    This is returned when the LLM outputs a function call not exists error.
+    """
+
+    function_name: str = ''
+    error_message: str = ''
+    observation: str = ObservationType.FUNCTION_CALL_NOT_EXISTS
+
+    @property
+    def message(self) -> str:
+        return self.error_message
+
+
 class MicroagentKnowledge:
     """Represents knowledge from a triggered microagent.
 

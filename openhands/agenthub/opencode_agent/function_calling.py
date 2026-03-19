@@ -47,6 +47,7 @@ from openhands.events.action import (
     TodoReadAction,
     TodoWriteAction,
     ValidationFailureAction,
+    FunctionCallNotExistsAction
 )
 from openhands.events.action.mcp import MCPAction
 from openhands.events.event import FileEditSource
@@ -284,13 +285,14 @@ def response_to_actions(
 
             except FunctionCallNotExistsError as e:
                 # Send error as a user message while preserving the assistant message
-                action = MessageAction(
-                    content=str(e),
-                    wait_for_response=False,
+                action = FunctionCallNotExistsAction(
+                    function_name=tool_call.function.name,
+                    error_message=str(e),
+                    thought=thought if i == 0 else '',
                 )
 
             # Add thought to first action
-            if i == 0 and not isinstance(action, (ValidationFailureAction, MessageAction)):
+            if i == 0 and not isinstance(action, (ValidationFailureAction, FunctionCallNotExistsAction)):
                 action = combine_thought(action, thought)
 
             # Add metadata for tool calling

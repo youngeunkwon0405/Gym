@@ -266,3 +266,21 @@ class ValidationFailureAction(Action):
         if self.function_name:
             return f'Validation failure for {self.function_name}: {self.error_message}'
         return f'Validation failure: {self.error_message}'
+
+@dataclass
+class FunctionCallNotExistsAction(Action):
+    """An action that represents a function call not exists error.
+
+    This is returned when the LLM outputs a function call not exists error.
+    """
+
+    function_name: str = ''
+    error_message: str = ''
+    thought: str = ''
+    action: str = ActionType.FUNCTION_CALL_NOT_EXISTS
+
+    @property
+    def message(self) -> str:
+        if self.function_name:
+            return f'Tool {self.function_name} does not exist: {self.error_message}'
+        return f'Tool does not exist: {self.error_message}'

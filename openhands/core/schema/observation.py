@@ -65,6 +65,9 @@ class ObservationType(str, Enum):
     VALIDATION_FAILURE = 'validation_failure'
     """Result of a validation failure for a function call"""
 
+    FUNCTION_CALL_NOT_EXISTS = 'function_call_not_exists'
+    """Result of a function call not exists error."""
+
     # OpenCode-style observations
     GLOB = 'glob'
     """Result of a glob file search operation."""

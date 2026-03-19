@@ -10,9 +10,11 @@ from openhands.events.action.agent import (
     ChangeAgentStateAction,
     CondensationAction,
     CondensationRequestAction,
+    FunctionCallNotExistsAction,
     LoopRecoveryAction,
     RecallAction,
     TaskTrackingAction,
+    ValidationFailureAction,
 )
 from openhands.events.action.browse import BrowseInteractiveAction, BrowseURLAction
 from openhands.events.action.commands import (
@@ -69,6 +71,8 @@ actions = (
     MCPAction,
     TaskTrackingAction,
     LoopRecoveryAction,
+    ValidationFailureAction,
+    FunctionCallNotExistsAction,
     # OpenCode-style actions
     GlobAction,
     GrepAction,
