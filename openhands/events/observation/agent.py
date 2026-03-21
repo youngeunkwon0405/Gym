@@ -79,6 +79,7 @@ class FunctionCallNotExistsObservation(Observation):
         return self.error_message
 
 
+@dataclass
 class MicroagentKnowledge:
     """Represents knowledge from a triggered microagent.
 
