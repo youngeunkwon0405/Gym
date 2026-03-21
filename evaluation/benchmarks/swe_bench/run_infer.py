@@ -915,7 +915,7 @@ def process_instance(
         )
     finally:
         runtime.close()
-        _cleanup_eval_sessions(eval_sessions_dir, pre_existing_sessions)
+        # _cleanup_eval_sessions(eval_sessions_dir, pre_existing_sessions)
     # ==========================================
 
     # ======= Attempt to evaluate the agent's edits =======
