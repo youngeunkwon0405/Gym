@@ -186,7 +186,7 @@ def set_dataset_type(dataset_name: str) -> str:
     elif 'multimodal' in name_lower:
         DATASET_TYPE = 'Multimodal'
     elif 'multilingual' in name_lower:
-        DATASET_TYPE = 'SWE-Multilingual'
+        DATASET_TYPE = 'SWE-bench_Multilingual'
     else:
         DATASET_TYPE = 'SWE-bench'
 
@@ -304,7 +304,7 @@ def get_instance_docker_image(
             docker_image_prefix = 'docker.io/swerebench/'
         elif DATASET_TYPE in ['R2E-Gym', 'nv-internal-1', 'SWE-rebench-V2']:
             docker_image_prefix = 'UNAVAILABLE'
-        elif DATASET_TYPE == 'SWE-Multilingual':
+        elif DATASET_TYPE == 'SWE-bench_Multilingual':
             docker_image_prefix = 'docker.io/swebench/'
         repo, name = instance_id.split('__')
         image_name = f'{docker_image_prefix.rstrip("/")}/sweb.eval.x86_64.{repo}_1776_{name}:latest'.lower()
@@ -543,7 +543,7 @@ source ~/.bashrc
             obs = runtime.run_action(action)
             logger.info(obs, extra={'msg_type': 'OBSERVATION'})
 
-    if DATASET_TYPE not in ('Multimodal', 'SWE-bench-Live', 'nv-internal-1', 'SWE-rebench', 'SWE-rebench-V2', 'SWE-Multilingual'):
+    if DATASET_TYPE not in ('Multimodal', 'SWE-bench-Live', 'nv-internal-1', 'SWE-rebench', 'SWE-rebench-V2', 'SWE-bench_Multilingual'):
         # Only for non-multimodal datasets, we need to activate the testbed environment for Python
         # SWE-Bench multimodal datasets, SWE-bench-Live, nv-internal-1, and SWE-rebench are not using the testbed environment
         action = CmdRunAction(command='which python')
