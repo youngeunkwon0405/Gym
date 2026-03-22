@@ -67,8 +67,10 @@ from openhands.events.observation.codex import (
 )
 from openhands.events.observation.terminus_2 import Terminus2CmdOutputObservation
 from openhands.events.observation.agent import (
+    FunctionCallNotExistsObservation,
     MicroagentKnowledge,
     RecallObservation,
+    ValidationFailureObservation,
 )
 from openhands.events.observation.error import ErrorObservation
 from openhands.events.observation.mcp import MCPObservation
@@ -596,6 +598,12 @@ class ConversationMemory:
         elif isinstance(obs, ErrorObservation):
             text = truncate_content(obs.content, max_message_chars)
             text += '\n[Error occurred in processing last action]'
+            message = Message(role='user', content=[TextContent(text=text)])
+        elif isinstance(obs, ValidationFailureObservation):
+            text = truncate_content(obs.message, max_message_chars)
+            message = Message(role='user', content=[TextContent(text=text)])
+        elif isinstance(obs, FunctionCallNotExistsObservation):
+            text = truncate_content(obs.message, max_message_chars)
             message = Message(role='user', content=[TextContent(text=text)])
         elif isinstance(obs, UserRejectObservation):
             text = 'OBSERVATION:\n' + truncate_content(obs.content, max_message_chars)

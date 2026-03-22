@@ -1583,3 +1583,241 @@ def test_process_ipython_observation_with_vision_disabled(
     assert isinstance(message.content[1], ImageContent)
     # Check that NO explanatory text about filtered images was added when vision is disabled
     assert 'invalid or empty image(s) were filtered' not in message.content[0].text
+
+
+# =========================================================================
+# ValidationFailureObservation and FunctionCallNotExistsObservation tests
+# =========================================================================
+
+
+def test_process_events_with_validation_failure_observation(conversation_memory):
+    """ValidationFailureObservation with tool_call_metadata is handled as a tool response."""
+    from openhands.events.observation.agent import ValidationFailureObservation
+
+    mock_response = {
+        'id': 'resp-val',
+        'choices': [
+            {
+                'message': {
+                    'role': 'assistant',
+                    'content': None,
+                    'tool_calls': [
+                        {
+                            'id': 'tc-val-1',
+                            'type': 'function',
+                            'function': {
+                                'name': 'str_replace_editor',
+                                'arguments': '{}',
+                            },
+                        }
+                    ],
+                }
+            }
+        ],
+        'created': 0,
+        'model': 'mock_model',
+        'object': 'chat.completion',
+        'usage': {'completion_tokens': 0, 'prompt_tokens': 0, 'total_tokens': 0},
+    }
+
+    obs = ValidationFailureObservation(
+        content='Missing required argument "path" in tool call str_replace_editor',
+        function_name='str_replace_editor',
+        error_message='Missing required argument "path" in tool call str_replace_editor',
+    )
+    obs.tool_call_metadata = ToolCallMetadata(
+        tool_call_id='tc-val-1',
+        function_name='str_replace_editor',
+        model_response=mock_response,
+        total_calls_in_response=1,
+    )
+
+    initial_user_action = MessageAction(content='Initial user message')
+    initial_user_action._source = EventSource.USER
+    messages = conversation_memory.process_events(
+        condensed_history=[obs],
+        initial_user_action=initial_user_action,
+        max_message_chars=None,
+        vision_is_active=False,
+    )
+
+    # With tool_call_metadata, the observation is stored in tool_call_id_to_message
+    # and returned as part of the assistant message batch — so process_events
+    # only returns system + initial user (the tool response is batched)
+    assert len(messages) == 2
+
+
+def test_process_observation_validation_failure_sets_message(conversation_memory):
+    """_process_observation for ValidationFailureObservation creates a message
+    that the tool_call_metadata branch can convert to a tool response."""
+    from openhands.events.observation.agent import ValidationFailureObservation
+
+    obs = ValidationFailureObservation(
+        content='Missing required argument "path"',
+        function_name='str_replace_editor',
+        error_message='Missing required argument "path"',
+    )
+
+    tool_call_id_to_message = {}
+    messages = conversation_memory._process_observation(
+        obs=obs,
+        tool_call_id_to_message=tool_call_id_to_message,
+        max_message_chars=None,
+        vision_is_active=False,
+    )
+
+    # Without tool_call_metadata, it returns the message directly
+    assert len(messages) == 1
+    msg = messages[0]
+    assert msg.role == 'user'
+    assert 'Validation failure for str_replace_editor' in msg.content[0].text
+    assert 'Missing required argument "path"' in msg.content[0].text
+
+
+def test_process_observation_validation_failure_with_tool_metadata(conversation_memory):
+    """ValidationFailureObservation with tool_call_metadata becomes a tool response."""
+    from openhands.events.observation.agent import ValidationFailureObservation
+
+    obs = ValidationFailureObservation(
+        content='Missing required argument "path"',
+        function_name='str_replace_editor',
+        error_message='Missing required argument "path"',
+    )
+    obs.tool_call_metadata = ToolCallMetadata(
+        tool_call_id='tc-val-1',
+        function_name='str_replace_editor',
+        model_response={
+            'id': 'resp-val',
+            'choices': [
+                {
+                    'message': {
+                        'role': 'assistant',
+                        'content': None,
+                        'tool_calls': [
+                            {
+                                'id': 'tc-val-1',
+                                'type': 'function',
+                                'function': {
+                                    'name': 'str_replace_editor',
+                                    'arguments': '{}',
+                                },
+                            }
+                        ],
+                    }
+                }
+            ],
+            'created': 0,
+            'model': 'mock_model',
+            'object': 'chat.completion',
+            'usage': {
+                'completion_tokens': 0,
+                'prompt_tokens': 0,
+                'total_tokens': 0,
+            },
+        },
+        total_calls_in_response=1,
+    )
+
+    tool_call_id_to_message = {}
+    messages = conversation_memory._process_observation(
+        obs=obs,
+        tool_call_id_to_message=tool_call_id_to_message,
+        max_message_chars=None,
+        vision_is_active=False,
+    )
+
+    # Returns empty because the message is stored in tool_call_id_to_message
+    assert messages == []
+    assert 'tc-val-1' in tool_call_id_to_message
+    tool_msg = tool_call_id_to_message['tc-val-1']
+    assert tool_msg.role == 'tool'
+    assert tool_msg.tool_call_id == 'tc-val-1'
+    assert tool_msg.name == 'str_replace_editor'
+    assert 'Validation failure for str_replace_editor' in tool_msg.content[0].text
+
+
+def test_process_observation_function_call_not_exists_sets_message(conversation_memory):
+    """_process_observation for FunctionCallNotExistsObservation creates a message."""
+    from openhands.events.observation.agent import FunctionCallNotExistsObservation
+
+    obs = FunctionCallNotExistsObservation(
+        content='Tool bash is not registered.',
+        function_name='bash',
+        error_message='Tool bash is not registered. Please check the tool name and retry.',
+    )
+
+    tool_call_id_to_message = {}
+    messages = conversation_memory._process_observation(
+        obs=obs,
+        tool_call_id_to_message=tool_call_id_to_message,
+        max_message_chars=None,
+        vision_is_active=False,
+    )
+
+    assert len(messages) == 1
+    msg = messages[0]
+    assert msg.role == 'user'
+    assert 'not registered' in msg.content[0].text
+
+
+def test_process_observation_function_call_not_exists_with_tool_metadata(
+    conversation_memory,
+):
+    """FunctionCallNotExistsObservation with tool_call_metadata becomes a tool response."""
+    from openhands.events.observation.agent import FunctionCallNotExistsObservation
+
+    obs = FunctionCallNotExistsObservation(
+        content='Tool bash is not registered.',
+        function_name='bash',
+        error_message='Tool bash is not registered. Please check the tool name and retry.',
+    )
+    obs.tool_call_metadata = ToolCallMetadata(
+        tool_call_id='tc-bad-1',
+        function_name='bash',
+        model_response={
+            'id': 'resp-bad',
+            'choices': [
+                {
+                    'message': {
+                        'role': 'assistant',
+                        'content': None,
+                        'tool_calls': [
+                            {
+                                'id': 'tc-bad-1',
+                                'type': 'function',
+                                'function': {
+                                    'name': 'bash',
+                                    'arguments': '{}',
+                                },
+                            }
+                        ],
+                    }
+                }
+            ],
+            'created': 0,
+            'model': 'mock_model',
+            'object': 'chat.completion',
+            'usage': {
+                'completion_tokens': 0,
+                'prompt_tokens': 0,
+                'total_tokens': 0,
+            },
+        },
+        total_calls_in_response=1,
+    )
+
+    tool_call_id_to_message = {}
+    messages = conversation_memory._process_observation(
+        obs=obs,
+        tool_call_id_to_message=tool_call_id_to_message,
+        max_message_chars=None,
+        vision_is_active=False,
+    )
+
+    assert messages == []
+    assert 'tc-bad-1' in tool_call_id_to_message
+    tool_msg = tool_call_id_to_message['tc-bad-1']
+    assert tool_msg.role == 'tool'
+    assert tool_msg.tool_call_id == 'tc-bad-1'
+    assert tool_msg.name == 'bash'
+    assert 'not registered' in tool_msg.content[0].text
