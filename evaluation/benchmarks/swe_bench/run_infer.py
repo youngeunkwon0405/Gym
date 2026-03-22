@@ -70,6 +70,7 @@ from openhands.events.serialization.event import event_from_dict, event_to_dict
 from openhands.runtime.base import Runtime
 from openhands.utils.async_utils import call_async_from_sync
 from openhands.utils.shutdown_listener import sleep_if_should_continue
+from evaluation.benchmarks.swe_bench.replay_utils import messages_to_replay_events  # noqa: E402
 
 USE_HINT_TEXT = os.environ.get('USE_HINT_TEXT', 'false').lower() == 'true'
 RUN_WITH_BROWSING = os.environ.get('RUN_WITH_BROWSING', 'false').lower() == 'true'
@@ -79,6 +80,9 @@ BenchMode = Literal['swe', 'swt', 'swt-ci']
 
 # Global variable to track dataset type
 DATASET_TYPE = 'SWE-bench'
+
+# Maps instance_id -> (replay_events, initial_action) for replay-and-continue mode
+REPLAY_DATA: dict[str, tuple[list, MessageAction]] = {}
 
 MAX_RETRIES = 3
 
@@ -181,6 +185,8 @@ def set_dataset_type(dataset_name: str) -> str:
         DATASET_TYPE = 'SWE-rebench'
     elif 'multimodal' in name_lower:
         DATASET_TYPE = 'Multimodal'
+    elif 'multilingual' in name_lower:
+        DATASET_TYPE = 'SWE-Multilingual'
     else:
         DATASET_TYPE = 'SWE-bench'
 
@@ -298,6 +304,8 @@ def get_instance_docker_image(
             docker_image_prefix = 'docker.io/swerebench/'
         elif DATASET_TYPE in ['R2E-Gym', 'nv-internal-1', 'SWE-rebench-V2']:
             docker_image_prefix = 'UNAVAILABLE'
+        elif DATASET_TYPE == 'SWE-Multilingual':
+            docker_image_prefix = 'docker.io/swebench/'
         repo, name = instance_id.split('__')
         image_name = f'{docker_image_prefix.rstrip("/")}/sweb.eval.x86_64.{repo}_1776_{name}:latest'.lower()
         logger.debug(f'Using official SWE-Bench image: {image_name}')
@@ -535,7 +543,7 @@ source ~/.bashrc
             obs = runtime.run_action(action)
             logger.info(obs, extra={'msg_type': 'OBSERVATION'})
 
-    if DATASET_TYPE not in ('Multimodal', 'SWE-bench-Live', 'nv-internal-1', 'SWE-rebench', 'SWE-rebench-V2'):
+    if DATASET_TYPE not in ('Multimodal', 'SWE-bench-Live', 'nv-internal-1', 'SWE-rebench', 'SWE-rebench-V2', 'SWE-Multilingual'):
         # Only for non-multimodal datasets, we need to activate the testbed environment for Python
         # SWE-Bench multimodal datasets, SWE-bench-Live, nv-internal-1, and SWE-rebench are not using the testbed environment
         action = CmdRunAction(command='which python')
@@ -881,6 +889,15 @@ def process_instance(
         print(f"init runtime: {end_time - start_time} seconds", flush = True)
         message_action = get_instruction(instance, metadata)
 
+        # Check if we have replay data for this instance
+        replay_events = None
+        if instance.instance_id in REPLAY_DATA:
+            replay_events, replay_initial_action = REPLAY_DATA[instance.instance_id]
+            message_action = replay_initial_action
+            logger.info(
+                f'Replay mode: replaying {len(replay_events)} events for {instance.instance_id}'
+            )
+
         # Here's how you can run the agent (similar to the `main` function) and get the final task state
         start_time = time.perf_counter()
         state: State | None = asyncio.run(
@@ -891,6 +908,7 @@ def process_instance(
                 fake_user_response_fn=AGENT_CLS_TO_FAKE_USER_RESPONSE_FN[
                     metadata.agent_class
                 ],
+                replay_events=replay_events,
             )
         )
         end_time = time.perf_counter()
@@ -1060,6 +1078,12 @@ if __name__ == '__main__':
         default=None,
         help='Path to a custom system_prompt_long_horizon.j2 file',
     )
+    parser.add_argument(
+        '--replay-messages-path',
+        type=str,
+        default=None,
+        help='Path to a JSON file with raw LLM messages (OpenAI chat format) to replay before continuing.',
+    )
 
     args, _ = parser.parse_known_args()
 
@@ -1202,6 +1226,21 @@ if __name__ == '__main__':
         agent_config=agent_config,
         condenser_config=condenser_config,
     )
+
+    # Load replay messages if provided
+    if args.replay_messages_path:
+        if not args.selected_id:
+            raise ValueError('--replay-messages-path requires --selected-id')
+        with open(args.replay_messages_path, 'r') as f:
+            replay_messages = json.load(f)
+        replay_events, replay_initial_action = messages_to_replay_events(
+            replay_messages, metadata.agent_class
+        )
+        REPLAY_DATA[args.selected_id] = (replay_events, replay_initial_action)
+        logger.info(
+            f'Loaded replay history for {args.selected_id}: '
+            f'{len(replay_events)} events to replay'
+        )
 
     output_file = os.path.join(metadata.eval_output_dir, 'output.jsonl')
     print(f'### OUTPUT FILE: {output_file} ###')

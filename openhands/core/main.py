@@ -59,6 +59,7 @@ async def run_controller(
     headless_mode: bool = True,
     memory: Memory | None = None,
     conversation_instructions: str | None = None,
+    replay_events: list[Event] | None = None,
 ) -> State | None:
     """Main coroutine to run the agent controller with task input flexibility.
 
@@ -74,6 +75,10 @@ async def run_controller(
         fake_user_response_fn: An optional function that receives the current state
             (could be None) and returns a fake user response.
         headless_mode: Whether the agent is run in headless mode.
+        replay_events: (optional) A list of Event objects to replay before running the agent.
+            When provided, these events are replayed against the runtime first, then the
+            agent continues with normal LLM calls. Takes precedence over
+            config.replay_trajectory_path.
 
     Returns:
         The final state of the agent, or None if an error occurred.
@@ -155,8 +160,7 @@ async def run_controller(
 
         await add_mcp_tools_to_agent(agent, runtime, memory)
 
-    replay_events: list[Event] | None = None
-    if config.replay_trajectory_path:
+    if replay_events is None and config.replay_trajectory_path:
         logger.info('Trajectory replay is enabled')
         assert isinstance(initial_user_action, NullAction)
         replay_events, initial_user_action = load_replay_log(
