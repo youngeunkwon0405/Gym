@@ -72,26 +72,25 @@ class TmuxMemoryMonitor(threading.Thread):
                 for window in session.windows:
                     for pane in window.panes:
                         try:
-                            # Get the PID of the process inside the pane
-                            # #{pane_pid} is the PID of the shell or command running in the pane
                             pane_pid_str = pane.cmd(
                                 "display-message", "-p", "#{pane_pid}"
                             ).stdout[0]
                             pane_pid = int(pane_pid_str)
 
-                            # Kill the process tree of that pane
                             parent = psutil.Process(pane_pid)
-                            children = parent.children(recursive=True)
-
-                            print(
-                                f"[TmuxMemoryMonitor] Killing pane {pane.id} (PID: {pane_pid})",
-                                flush=True,
-                            )
-
-                            for child in children:
-                                child.kill()
-
-                            parent.kill()
+                            shell_proc = BashSession._find_shell_proc(parent)
+                            targets = shell_proc.children(recursive=True)
+                            if targets:
+                                print(
+                                    f"[TmuxMemoryMonitor] Killing {len(targets)} command processes in pane {pane.id} "
+                                    f"(shell PID: {shell_proc.pid}, keeping shell alive)",
+                                    flush=True,
+                                )
+                                for child in targets:
+                                    try:
+                                        child.kill()
+                                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                        pass
 
                         except (psutil.NoSuchProcess, IndexError, ValueError):
                             continue
@@ -396,11 +395,97 @@ class BashSession:
     def cwd(self) -> str:
         return self._cwd
 
+    @staticmethod
+    def _find_shell_proc(pane_proc: psutil.Process) -> psutil.Process:
+        """Walk down through single-child shell wrappers (e.g. su → bash)
+        to find the actual shell process.
+
+        Returns the deepest shell process in the chain. If the pane_proc
+        itself is the shell, returns it unchanged.
+        """
+        shell_proc = pane_proc
+        while True:
+            kids = shell_proc.children(recursive=False)
+            if not kids:
+                break
+            first = kids[0]
+            try:
+                name = first.name()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                break
+            if len(kids) == 1 and name in ('bash', 'sh', 'zsh', 'fish', 'dash'):
+                shell_proc = first
+            else:
+                break
+        return shell_proc
+
     def _is_special_key(self, command: str) -> bool:
         """Check if the command is a special key."""
         # Special keys are of the form C-<key>
         _command = command.strip()
         return _command.startswith("C-") and len(_command) == 3
+
+    def _send_keys_checked(self, keys: str, enter: bool = True) -> None:
+        """Send keys to the tmux pane and log any errors.
+
+        Unlike pane.send_keys(), this method checks the return value of
+        the underlying tmux command and logs errors instead of silently
+        swallowing them.
+        """
+        result = self.pane.cmd("send-keys", keys)
+        if result.stderr:
+            logger.error(
+                f"tmux send-keys {keys!r} FAILED: {result.stderr} "
+                f"(returncode={result.returncode}, pane_id={self.pane.pane_id})"
+            )
+        if enter:
+            result = self.pane.cmd("send-keys", "Enter")
+            if result.stderr:
+                logger.error(
+                    f"tmux send-keys Enter FAILED: {result.stderr} "
+                    f"(returncode={result.returncode})"
+                )
+
+    def _kill_pane_processes(self) -> bool:
+        """Kill foreground command processes in the tmux pane via SIGKILL.
+
+        The pane process tree is: pane_init (su) → shell (bash) → commands.
+        We must kill only the commands, NOT the shell, or the pane dies.
+        Walks down to the deepest shell and kills its children.
+        """
+        try:
+            pane_pid_str = self.pane.cmd(
+                "display-message", "-p", "#{pane_pid}"
+            ).stdout[0]
+            pane_pid = int(pane_pid_str)
+            print(f"[BASH_SIGNAL] Pane PID: {pane_pid}", flush=True)
+
+            proc = psutil.Process(pane_pid)
+            shell_proc = self._find_shell_proc(proc)
+
+            targets = shell_proc.children(recursive=True)
+            if not targets:
+                print(f"[BASH_SIGNAL] Shell PID {shell_proc.pid} has no command children", flush=True)
+                return False
+
+            print(f"[BASH_SIGNAL] Shell: {shell_proc.pid} ({shell_proc.name()}) → killing {len(targets)} processes: {[(t.pid, t.name()) for t in targets]}", flush=True)
+            for target in targets:
+                try:
+                    target.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+
+            psutil.wait_procs(targets, timeout=3)
+            print(f"[BASH_SIGNAL] Kill complete", flush=True)
+            return True
+        except (psutil.NoSuchProcess, IndexError, ValueError) as e:
+            print(f"[BASH_SIGNAL] Kill failed: {type(e).__name__}: {e}", flush=True)
+            return False
+        except Exception as e:
+            print(f"[BASH_SIGNAL] Kill failed unexpectedly: {type(e).__name__}: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            return False
 
     def _clear_screen(self) -> None:
         """Clear the tmux pane screen and history."""
@@ -610,6 +695,10 @@ class BashSession:
         command = action.command.strip()
         is_input: bool = action.is_input
 
+        print(f"COMMAND: {command}")
+        print(f"IS INPUT: {is_input}")
+        print(f"================================================")
+
         # If the previous command is not completed, we need to check if the command is empty
         if self.prev_status not in {
             BashCommandStatus.CONTINUE,
@@ -713,22 +802,29 @@ class BashSession:
             )
 
         # Send actual command/inputs to the pane
+        is_interrupt_signal = (
+            is_input
+            and self._is_special_key(command)
+            and command.strip() in ("C-c", "C-z", "C-d")
+        )
         if command != "":
             is_special_key = self._is_special_key(command)
             if is_input:
                 logger.debug(f"SENDING INPUT TO RUNNING PROCESS: {command!r}")
-                self.pane.send_keys(
-                    command,
-                    enter=not is_special_key,
-                )
+                self._send_keys_checked(command, enter=not is_special_key)
             else:
                 # convert command to raw string
                 command = escape_bash_special_chars(command)
                 logger.debug(f"SENDING COMMAND: {command!r}")
-                self.pane.send_keys(
-                    command,
-                    enter=not is_special_key,
-                )
+                self._send_keys_checked(command, enter=not is_special_key)
+
+        # For interrupt signals (C-c, C-z), use a shorter retry interval.
+        # Many processes (e.g. pytest, long-running test suites) need multiple
+        # SIGINTs: the first triggers graceful shutdown, the second aborts.
+        SIGNAL_RETRY_INTERVAL = 1  # seconds between resending the signal
+        MAX_SIGNAL_RETRIES = 5
+        signal_retry_count = 0
+        last_signal_send_time = time.time()
 
         # Loop until the command completes or times out
         while should_continue():
@@ -768,6 +864,34 @@ class BashSession:
                 )
 
             # Timeout checks should only trigger if a new prompt hasn't appeared yet.
+
+            # For interrupt signals, resend if no change after SIGNAL_RETRY_INTERVAL.
+            # After all retries are exhausted, escalate to SIGKILL via PID.
+            if is_interrupt_signal:
+                if signal_retry_count < MAX_SIGNAL_RETRIES:
+                    time_since_last_signal = time.time() - last_signal_send_time
+                    if time_since_last_signal >= SIGNAL_RETRY_INTERVAL:
+                        signal_retry_count += 1
+                        logger.info(
+                            f"Signal retry: resending {command!r} "
+                            f"(attempt {signal_retry_count + 1}/{MAX_SIGNAL_RETRIES + 1}, "
+                            f"no response for {time_since_last_signal:.1f}s)"
+                        )
+                        self._send_keys_checked(command, enter=False)
+                        last_signal_send_time = time.time()
+                        last_change_time = time.time()
+                elif signal_retry_count == MAX_SIGNAL_RETRIES:
+                    # All signal retries exhausted — escalate to SIGKILL
+                    signal_retry_count += 1  # prevent re-entry
+                    print(f"[BASH_SIGNAL] All {MAX_SIGNAL_RETRIES} retries exhausted. Escalating to SIGKILL.", flush=True)
+                    logger.info(
+                        f"All {MAX_SIGNAL_RETRIES} signal retries exhausted. "
+                        f"Escalating to SIGKILL via PID."
+                    )
+                    killed = self._kill_pane_processes()
+                    print(f"[BASH_SIGNAL] _kill_pane_processes returned: {killed}", flush=True)
+                    if killed:
+                        last_change_time = time.time()
 
             # 2) Execution timed out since there's no change in output
             # for a while (self.NO_CHANGE_TIMEOUT_SECONDS)

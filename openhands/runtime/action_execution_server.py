@@ -2284,9 +2284,9 @@ class ActionExecutor:
                     command_keystrokes=keystrokes,
                 )
 
-            if keystrokes.strip() in ('C-c', 'C-d'):
+            if keystrokes.strip() in ('C-c', 'C-d', 'C-z'):
                 special_key = keystrokes.strip()
-                cmd_action = CmdRunAction(command=special_key)
+                cmd_action = CmdRunAction(command=special_key, is_input=True)
                 cmd_action.set_hard_timeout(duration + 5, blocking=False)
                 obs = await call_sync_from_async(bash_session.execute, cmd_action)
                 screen = self._format_terminal_screen(obs, f'^{"C" if special_key == "C-c" else "D"}', pre_cwd)

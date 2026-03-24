@@ -601,19 +601,14 @@ def complete_runtime(
     logger.info(obs, extra={'msg_type': 'OBSERVATION'})
 
     if obs.exit_code == -1:
-        # The previous command is still running
-        # We need to kill previous command
-        logger.info('The previous command is still running, trying to kill it...')
-        action = CmdRunAction(command='C-c')
+        # The previous command is still running — try C-c (SIGINT).
+        # is_input=True is required so the signal reaches the tmux pane
+        # instead of being rejected by the "previous command still running" guard.
+        logger.info('The previous command is still running, sending C-c (is_input=True)...')
+        action = CmdRunAction(command='C-c', is_input=True)
         obs = runtime.run_action(action)
         logger.info(obs, extra={'msg_type': 'OBSERVATION'})
-        if obs.exit_code == -1:
-            logger.info('C-c without is_input failed, retrying with is_input=True...')
-            action = CmdRunAction(command='C-c', is_input=True)
-            obs = runtime.run_action(action)
-            logger.info(obs, extra={'msg_type': 'OBSERVATION'})
 
-        # Then run the command again
         action = CmdRunAction(command=f'cd {workspace_path}')
         action.set_hard_timeout(600)
         logger.info(action, extra={'msg_type': 'ACTION'})
@@ -621,19 +616,29 @@ def complete_runtime(
         logger.info(obs, extra={'msg_type': 'OBSERVATION'})
 
     if obs.exit_code == -1:
-        # The previous command is still running
-        # We need to kill previous command
-        logger.info('The previous command is still running, trying to ctrl+z it...')
-        action = CmdRunAction(command='C-z')
+        # C-c didn't work — try sending C-c twice (some processes like pytest
+        # need two SIGINTs: the first triggers graceful shutdown, the second aborts).
+        logger.info('C-c failed, sending C-c twice...')
+        action = CmdRunAction(command='C-c', is_input=True)
+        runtime.run_action(action)
+        action = CmdRunAction(command='C-c', is_input=True)
         obs = runtime.run_action(action)
         logger.info(obs, extra={'msg_type': 'OBSERVATION'})
-        if obs.exit_code == -1:
-            logger.info('C-z without is_input failed, retrying with is_input=True...')
-            action = CmdRunAction(command='C-z', is_input=True)
-            obs = runtime.run_action(action)
-            logger.info(obs, extra={'msg_type': 'OBSERVATION'})
 
-        # Then run the command again
+        action = CmdRunAction(command=f'cd {workspace_path}')
+        action.set_hard_timeout(600)
+        logger.info(action, extra={'msg_type': 'ACTION'})
+        obs = runtime.run_action(action)
+        logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+
+    if obs.exit_code == -1:
+        # Multiple C-c didn't work — try C-z (SIGTSTP) to suspend.
+        # If the process suspends, the shell returns a prompt and we can proceed.
+        logger.info('Multiple C-c failed, sending C-z (is_input=True) to suspend...')
+        action = CmdRunAction(command='C-z', is_input=True)
+        obs = runtime.run_action(action)
+        logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+
         action = CmdRunAction(command=f'cd {workspace_path}')
         action.set_hard_timeout(600)
         logger.info(action, extra={'msg_type': 'ACTION'})
