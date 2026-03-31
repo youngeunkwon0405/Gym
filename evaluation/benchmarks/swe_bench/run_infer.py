@@ -465,8 +465,10 @@ source ~/.bashrc
             '/swe_util/',
         )
 
-    # nv-internal-1 and SWE-rebench-V2 instances operate directly in their repo dir.
-    if DATASET_TYPE not in ('nv-internal-1', 'SWE-rebench-V2'):
+    # These dataset types operate directly in their repo dir, skipping the copy-to-workspace step.
+    SKIP_ENTRY_SCRIPT_TYPES = ('nv-internal-1', 'SWE-rebench-V2', 'SWE-Gym', 'R2E-Gym')
+
+    if DATASET_TYPE not in SKIP_ENTRY_SCRIPT_TYPES:
         action = CmdRunAction(command=f'source /swe_util/{entry_script_path}')
         action.set_hard_timeout(600)
         logger.info(action, extra={'msg_type': 'ACTION'})
@@ -476,8 +478,42 @@ source ~/.bashrc
             obs.exit_code == 0,
             f'Failed to source /swe_util/{entry_script_path}: {str(obs)}',
         )
+    elif DATASET_TYPE == 'SWE-Gym':
+        # SWE-Gym: activate conda testbed environment
+        action = CmdRunAction(
+            command=(
+                "deactivate >/dev/null 2>&1 || true; unset VIRTUAL_ENV; "
+                "if [ -d /opt/miniconda3 ]; then "
+                ". /opt/miniconda3/etc/profile.d/conda.sh && conda activate testbed; "
+                "fi; which python"
+            )
+        )
+        action.set_hard_timeout(120)
+        logger.info(action, extra={"msg_type": "ACTION"})
+        obs = runtime.run_action(action)
+        logger.info(obs, extra={"msg_type": "OBSERVATION"})
+        assert_and_raise(
+            obs.exit_code == 0,
+            f"Failed to activate SWE-Gym conda environment: {str(obs)}",
+        )
+    elif DATASET_TYPE == 'R2E-Gym':
+        # R2E-Gym: activate the venv bundled in the container
+        action = CmdRunAction(
+            command=(
+                "deactivate >/dev/null 2>&1 || true; unset VIRTUAL_ENV; "
+                "source /testbed/.venv/bin/activate; which python"
+            )
+        )
+        action.set_hard_timeout(120)
+        logger.info(action, extra={"msg_type": "ACTION"})
+        obs = runtime.run_action(action)
+        logger.info(obs, extra={"msg_type": "OBSERVATION"})
+        assert_and_raise(
+            obs.exit_code == 0,
+            f"Failed to activate R2E-Gym venv: {str(obs)}",
+        )
     elif instance.get("repo_language", instance.get("language", "")).lower() == "python":
-        # change python to the base python in the container and not the OpenHands venv
+        # nv-internal-1 / SWE-rebench-V2: use base python in the container
         action = CmdRunAction(
             command=(
                 "deactivate >/dev/null 2>&1 || true; unset VIRTUAL_ENV; "
@@ -575,6 +611,8 @@ def _get_workspace_path(
         repo = instance.get("repo", "")
         repo_name = repo.split("/")[1] if "/" in repo else repo
         return f"/{repo_name}"
+    if DATASET_TYPE in ("SWE-Gym", "R2E-Gym"):
+        return "/testbed"
     return f"/workspace/{workspace_dir_name}"
 
 def complete_runtime(
