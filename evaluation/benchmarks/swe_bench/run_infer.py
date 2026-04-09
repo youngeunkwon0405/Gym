@@ -78,6 +78,10 @@ ENABLE_BROWSER_FOR_SWEBENCH = os.environ.get('ENABLE_BROWSER_FOR_SWEBENCH', 'fal
 ENABLE_LLM_EDITOR = os.environ.get('ENABLE_LLM_EDITOR', 'false').lower() == 'true'
 BenchMode = Literal['swe', 'swt', 'swt-ci']
 
+# Multilingual support: language for SWE-bench_Multilingual docker images, instructions, and gitignore scripts
+LANGUAGE = os.environ.get('LANGUAGE', 'python')
+DOCKER_IMAGE_PREFIX = os.environ.get('EVAL_DOCKER_IMAGE_PREFIX', '')
+
 # Global variable to track dataset type
 DATASET_TYPE = 'SWE-bench'
 
@@ -208,9 +212,269 @@ def _get_swebench_workspace_dir_name(instance: pd.Series) -> str:
         return f'{instance.repo}__{instance.version}'.replace('/', '__')
 
 
+def _get_multilingual_instruction(instance: pd.Series, workspace_dir_name: str) -> str:
+    """Return a language-specific instruction for SWE-bench Multilingual.
+
+    Ported from multi_swe_bench/run_infer.py to support multilingual evaluation
+    through the main swe_bench pipeline.
+    """
+    workspace_path = f'/workspace/{workspace_dir_name}'
+    base_commit = instance['base_commit']
+    problem = instance.problem_statement
+
+    # Per-language instruction templates with language-specific reproduction commands
+    instructions = {
+        'python': (
+            f'<uploaded_files>\n{workspace_path}\n</uploaded_files>\n'
+            f"I've uploaded a python code repository in the directory {workspace_path}. Consider the following issue description:\n\n"
+            f'<issue_description>\n{problem}\n</issue_description>\n\n'
+            'Can you help me implement the necessary changes to the repository so that the requirements specified in the <issue_description> are met?\n'
+            "I've already taken care of all changes to any of the test files described in the <issue_description>. This means you DON'T have to modify the testing logic or any of the tests in any way!\n"
+            "Also the development Python environment is already set up for you (i.e., all dependencies already installed), so you don't need to install other packages.\n"
+            'Your task is to make the minimal changes to non-test files in the /workspace directory to ensure the <issue_description> is satisfied.\n'
+            'Follow these steps to resolve the issue:\n'
+            '1. As a first step, it might be a good idea to explore the repo to familiarize yourself with its structure.\n'
+            '2. Create a script to reproduce the error and execute it with `python <filename.py>` using the BashTool, to confirm the error.\n'
+            '3. Edit the sourcecode of the repo to resolve the issue.\n'
+            '4. Rerun your reproduce script and confirm that the error is fixed!\n'
+            '5. Think about edgecases, add comprehensive tests for them in your reproduce script, and run them to make sure your fix handles them as well.\n'
+            f'6. Once you are done with the initial implementation, please carefully re-read the problem description and check the difference between the current code and the base commit {base_commit}. Do you think that the issue has been completely and comprehensively solved? Write tests to check the correctness of the solution, specifically focusing on tests that may point out any remaining problems that are not yet solved. Run all of the tests in the repo and check if any of them fail, and if they do fix the code. Repeat this process of carefully reading the problem description and current implementation, testing, and fixing any problems until you are confident that the current implementation is correct. Find and run any tests in the repo that are related to:\n'
+            '   - The issue you are fixing\n'
+            '   - The files you modified\n'
+            '   - The functions you changed\n'
+            '   Make sure all these tests pass with your changes.\n'
+            "Your thinking should be thorough and so it's fine if it's very long.\n"
+        ),
+        'java': (
+            f'<uploaded_files>\n{workspace_path}\n</uploaded_files>\n'
+            f"I've uploaded a Java code repository in the directory {workspace_path}. Consider the following issue description:\n\n"
+            f'<issue_description>\n{problem}\n</issue_description>\n\n'
+            'Can you help me implement the necessary changes to the repository so that the requirements specified in the <issue_description> are met?\n'
+            "I've already taken care of all changes to any of the test files described in the <issue_description>. This means you DON'T have to modify the testing logic or any of the tests in any way!\n"
+            "Also the development Java environment is already set up for you (i.e., all dependencies already installed), so you don't need to install other packages.\n"
+            'Your task is to make the minimal changes to non-test files in the /workspace directory to ensure the <issue_description> is satisfied.\n'
+            'Follow these steps to resolve the issue:\n'
+            '1. As a first step, it might be a good idea to explore the repo to familiarize yourself with its structure.\n'
+            '2. Create a Java class to reproduce the error and execute it by first compiling with `javac <classname>.java` and then running with `java <classname>` using the BashTool, to confirm the error\n'
+            '3. Edit the sourcecode of the repo to resolve the issue.\n'
+            '4. Rerun your reproduce script or class and confirm that the error is fixed!\n'
+            '5. Think about edgecases, add comprehensive tests for them in your reproduce class or script, and run them to make sure your fix handles these cases as well.\n'
+            f'6. Once you are done with the initial implementation, please carefully re-read the problem description and check the difference between the current code and the base commit {base_commit}. Do you think that the issue has been completely and comprehensively solved? Write tests to check the correctness of the solution, specifically focusing on tests that may point out any remaining problems that are not yet solved. Run all of the tests in the repo and check if any of them fail, and if they do fix the code. Repeat this process of carefully reading the problem description and current implementation, testing, and fixing any problems until you are confident that the current implementation is correct. Find and run any tests in the repo that are related to:\n'
+            '   - The issue you are fixing\n'
+            '   - The files you modified\n'
+            '   - The functions or classes you changed\n'
+            '   Make sure all these tests pass with your changes.\n'
+            "Your thinking should be thorough and so it's fine if it's very long.\n"
+        ),
+        'go': (
+            f'<uploaded_files>\n{workspace_path}\n</uploaded_files>\n'
+            f"I've uploaded a Go code repository in the directory {workspace_path}. Consider the following issue description:\n\n"
+            f'<issue_description>\n{problem}\n</issue_description>\n\n'
+            'Can you help me implement the necessary changes to the repository so that the requirements specified in the <issue_description> are met?\n'
+            "I've already taken care of all changes to any of the test files described in the <issue_description>. This means you DON'T have to modify the testing logic or any of the tests in any way!\n"
+            "Also the development Go environment is already set up for you (i.e., all dependencies already installed), so you don't need to install other packages.\n"
+            'Your task is to make the minimal changes to non-test files in the /workspace directory to ensure the <issue_description> is satisfied.\n'
+            'Follow these steps to resolve the issue:\n'
+            '1. As a first step, it might be a good idea to explore the repo to familiarize yourself with its structure.\n'
+            '2. Create a script or a function to reproduce the error and execute it with `go run <filename.go>` using the BashTool, to confirm the error.\n'
+            '3. Edit the sourcecode of the repo to resolve the issue.\n'
+            '4. Rerun your reproduce script and confirm that the error is fixed!\n'
+            '5. Think about edgecases, add comprehensive tests for them in your reproduce script, and run them to make sure your fix handles them as well.\n'
+            f'6. Once you are done with the initial implementation, please carefully re-read the problem description and check the difference between the current code and the base commit {base_commit}. Do you think that the issue has been completely and comprehensively solved? Write tests to check the correctness of the solution, specifically focusing on tests that may point out any remaining problems that are not yet solved. Run all of the tests in the repo and check if any of them fail, and if they do fix the code. Repeat this process of carefully reading the problem description and current implementation, testing, and fixing any problems until you are confident that the current implementation is correct. Find and run any tests in the repo that are related to:\n'
+            '   - The issue you are fixing\n'
+            '   - The files you modified\n'
+            '   - The functions you changed\n'
+            '   Make sure all these tests pass with your changes.\n'
+            "Your thinking should be thorough and so it's fine if it's very long.\n"
+        ),
+        'c': (
+            f'<uploaded_files>\n{workspace_path}\n</uploaded_files>\n'
+            f"I've uploaded a C code repository in the directory {workspace_path}. Consider the following issue description:\n\n"
+            f'<issue_description>\n{problem}\n</issue_description>\n\n'
+            'Can you help me implement the necessary changes to the repository so that the requirements specified in the <issue_description> are met?\n'
+            "I've already taken care of all changes to any of the test files described in the <issue_description>. This means you DON'T have to modify the testing logic or any of the tests in any way!\n"
+            "Also the development C environment is already set up for you (i.e., all dependencies already installed), so you don't need to install other packages.\n"
+            'Your task is to make the minimal changes to non-test files in the /workspace directory to ensure the <issue_description> is satisfied.\n'
+            'Follow these steps to resolve the issue:\n'
+            '1. As a first step, it might be a good idea to explore the repo to familiarize yourself with its structure.\n'
+            '2. Create a script to reproduce the error by compiling your C code (for example, using `gcc <filename.c> -o <executable>`) and then running the executable using the BashTool, to confirm the error.\n'
+            '3. Edit the sourcecode of the repo to resolve the issue.\n'
+            '4. Rerun your reproduce script and confirm that the error is fixed!\n'
+            '5. Think about edgecases, add comprehensive tests for them in your reproduce script, and run them to make sure your fix handles them as well.\n'
+            f'6. Once you are done with the initial implementation, please carefully re-read the problem description and check the difference between the current code and the base commit {base_commit}. Do you think that the issue has been completely and comprehensively solved? Write tests to check the correctness of the solution, specifically focusing on tests that may point out any remaining problems that are not yet solved. Run all of the tests in the repo and check if any of them fail, and if they do fix the code. Repeat this process of carefully reading the problem description and current implementation, testing, and fixing any problems until you are confident that the current implementation is correct. Find and run any tests in the repo that are related to:\n'
+            '   - The issue you are fixing\n'
+            '   - The files you modified\n'
+            '   - The functions you changed\n'
+            '   Make sure all these tests pass with your changes.\n'
+            "Your thinking should be thorough and so it's fine if it's very long.\n"
+        ),
+        'cpp': (
+            f'<uploaded_files>\n{workspace_path}\n</uploaded_files>\n'
+            f"I've uploaded a C++ code repository in the directory {workspace_path}. Consider the following issue description:\n\n"
+            f'<issue_description>\n{problem}\n</issue_description>\n\n'
+            'Can you help me implement the necessary changes to the repository so that the requirements specified in the <issue_description> are met?\n'
+            "I've already taken care of all changes to any of the test files described in the <issue_description>. This means you DON'T have to modify the testing logic or any of the tests in any way!\n"
+            "Also the development C++ environment is already set up for you (i.e., all dependencies already installed), so you don't need to install other packages.\n"
+            'Your task is to make the minimal changes to non-test files in the /workspace directory to ensure the <issue_description> is satisfied.\n'
+            'Follow these steps to resolve the issue:\n'
+            '1. As a first step, it might be a good idea to explore the repo to familiarize yourself with its structure.\n'
+            '2. Create or adapt a small executable (e.g., a main file or a test driver) to reproduce the issue. Build and run it (for example, by using `g++ -o reproduce reproduce.cpp && ./reproduce` via the BashTool) to confirm the error.\n'
+            '3. Edit the sourcecode of the repo to resolve the issue.\n'
+            '4. Rerun your reproduce script and confirm that the error is fixed!\n'
+            '5. Think about edgecases, add comprehensive tests for them in your reproduce script, and run them to make sure your fix handles them as well.\n'
+            f'6. Once you are done with the initial implementation, please carefully re-read the problem description and check the difference between the current code and the base commit {base_commit}. Do you think that the issue has been completely and comprehensively solved? Write tests to check the correctness of the solution, specifically focusing on tests that may point out any remaining problems that are not yet solved. Run all of the tests in the repo and check if any of them fail, and if they do fix the code. Repeat this process of carefully reading the problem description and current implementation, testing, and fixing any problems until you are confident that the current implementation is correct. Find and run any tests in the repo that are related to:\n'
+            '   - The issue you are fixing\n'
+            '   - The files you modified\n'
+            '   - The functions you changed\n'
+            '   Make sure all these tests pass with your changes.\n'
+            "Your thinking should be thorough and so it's fine if it's very long.\n"
+        ),
+        'javascript': (
+            f'<uploaded_files>\n{workspace_path}\n</uploaded_files>\n'
+            f"I've uploaded a Javascript code repository in the directory {workspace_path}. Consider the following issue description:\n\n"
+            f'<issue_description>\n{problem}\n</issue_description>\n\n'
+            'Can you help me implement the necessary changes to the repository so that the requirements specified in the <issue_description> are met?\n'
+            "I've already taken care of all changes to any of the test files described in the <issue_description>. This means you DON'T have to modify the testing logic or any of the tests in any way!\n"
+            "Also the development Javascript environment is already set up for you (i.e., all dependencies already installed), so you don't need to install other packages.\n"
+            'Your task is to make the minimal changes to non-test files in the /workspace directory to ensure the <issue_description> is satisfied.\n'
+            'Follow these steps to resolve the issue:\n'
+            '1. As a first step, it might be a good idea to explore the repo to familiarize yourself with its structure.\n'
+            '2. Create a script to reproduce the error and execute it with `node <filename.js>` using the BashTool, to confirm the error.\n'
+            '3. Edit the sourcecode of the repo to resolve the issue.\n'
+            '4. Rerun your reproduce script and confirm that the error is fixed!\n'
+            '5. Think about edgecases, add comprehensive tests for them in your reproduce script, and run them to make sure your fix handles them as well.\n'
+            f'6. Once you are done with the initial implementation, please carefully re-read the problem description and check the difference between the current code and the base commit {base_commit}. Do you think that the issue has been completely and comprehensively solved? Write tests to check the correctness of the solution, specifically focusing on tests that may point out any remaining problems that are not yet solved. Run all of the tests in the repo and check if any of them fail, and if they do fix the code. Repeat this process of carefully reading the problem description and current implementation, testing, and fixing any problems until you are confident that the current implementation is correct. Find and run any tests in the repo that are related to:\n'
+            '   - The issue you are fixing\n'
+            '   - The files you modified\n'
+            '   - The functions you changed\n'
+            '   Make sure all these tests pass with your changes.\n'
+            "Your thinking should be thorough and so it's fine if it's very long.\n"
+        ),
+        'typescript': (
+            f'<uploaded_files>\n{workspace_path}\n</uploaded_files>\n'
+            f"I've uploaded a Typescript code repository in the directory {workspace_path}. Consider the following issue description:\n\n"
+            f'<issue_description>\n{problem}\n</issue_description>\n\n'
+            'Can you help me implement the necessary changes to the repository so that the requirements specified in the <issue_description> are met?\n'
+            "I've already taken care of all changes to any of the test files described in the <issue_description>. This means you DON'T have to modify the testing logic or any of the tests in any way!\n"
+            "Also the development Typescript environment is already set up for you (i.e., all dependencies already installed), so you don't need to install other packages.\n"
+            'Your task is to make the minimal changes to non-test files in the /workspace directory to ensure the <issue_description> is satisfied.\n'
+            'Follow these steps to resolve the issue:\n'
+            '1. As a first step, it might be a good idea to explore the repo to familiarize yourself with its structure.\n'
+            '2. Create a script to reproduce the error and execute it with `ts-node <filename.ts>` using the BashTool, to confirm the error.\n'
+            '3. Edit the sourcecode of the repo to resolve the issue.\n'
+            '4. Rerun your reproduce script and confirm that the error is fixed!\n'
+            '5. Think about edgecases, add comprehensive tests for them in your reproduce script, and run them to make sure your fix handles them as well.\n'
+            f'6. Once you are done with the initial implementation, please carefully re-read the problem description and check the difference between the current code and the base commit {base_commit}. Do you think that the issue has been completely and comprehensively solved? Write tests to check the correctness of the solution, specifically focusing on tests that may point out any remaining problems that are not yet solved. Run all of the tests in the repo and check if any of them fail, and if they do fix the code. Repeat this process of carefully reading the problem description and current implementation, testing, and fixing any problems until you are confident that the current implementation is correct. Find and run any tests in the repo that are related to:\n'
+            '   - The issue you are fixing\n'
+            '   - The files you modified\n'
+            '   - The functions you changed\n'
+            '   Make sure all these tests pass with your changes.\n'
+            "Your thinking should be thorough and so it's fine if it's very long.\n"
+        ),
+        'rust': (
+            f'<uploaded_files>\n{workspace_path}\n</uploaded_files>\n'
+            f"I've uploaded a Rust code repository in the directory {workspace_path}. Consider the following issue description:\n\n"
+            f'<issue_description>\n{problem}\n</issue_description>\n\n'
+            'Can you help me implement the necessary changes to the repository so that the requirements specified in the <issue_description> are met?\n'
+            "I've already taken care of all changes to any of the test files described in the <issue_description>. This means you DON'T have to modify the testing logic or any of the tests in any way!\n"
+            "Also the development Rust environment is already set up for you (i.e., all dependencies already installed), so you don't need to install other packages.\n"
+            'Your task is to make the minimal changes to non-test files in the /workspace directory to ensure the <issue_description> is satisfied.\n'
+            'Follow these steps to resolve the issue:\n'
+            '1. As a first step, it might be a good idea to explore the repo to familiarize yourself with its structure.\n'
+            '2. Create a reproduction script (or binary) that triggers the error and execute it with `cargo run --bin <filename>` using the BashTool, to confirm the error.\n'
+            '3. Edit the sourcecode of the repo to resolve the issue.\n'
+            '4. Rerun your reproduce script and confirm that the error is fixed!\n'
+            '5. Think about edgecases, add comprehensive tests for them in your reproduce script, and run them to make sure your fix handles them as well.\n'
+            f'6. Once you are done with the initial implementation, please carefully re-read the problem description and check the difference between the current code and the base commit {base_commit}. Do you think that the issue has been completely and comprehensively solved? Write tests to check the correctness of the solution, specifically focusing on tests that may point out any remaining problems that are not yet solved. Run all of the tests in the repo and check if any of them fail, and if they do fix the code. Repeat this process of carefully reading the problem description and current implementation, testing, and fixing any problems until you are confident that the current implementation is correct. Find and run any tests in the repo that are related to:\n'
+            '   - The issue you are fixing\n'
+            '   - The files you modified\n'
+            '   - The functions you changed\n'
+            '   Make sure all these tests pass with your changes.\n'
+            "Your thinking should be thorough and so it's fine if it's very long.\n"
+        ),
+        'ruby': (
+            f'<uploaded_files>\n{workspace_path}\n</uploaded_files>\n'
+            f"I've uploaded a Ruby code repository in the directory {workspace_path}. Consider the following issue description:\n\n"
+            f'<issue_description>\n{problem}\n</issue_description>\n\n'
+            'Can you help me implement the necessary changes to the repository so that the requirements specified in the <issue_description> are met?\n'
+            "I've already taken care of all changes to any of the test files described in the <issue_description>. This means you DON'T have to modify the testing logic or any of the tests in any way!\n"
+            "Also the development Ruby environment is already set up for you (i.e., all dependencies already installed), so you don't need to install other packages.\n"
+            'Your task is to make the minimal changes to non-test files in the /workspace directory to ensure the <issue_description> is satisfied.\n'
+            'Follow these steps to resolve the issue:\n'
+            '1. As a first step, it might be a good idea to explore the repo to familiarize yourself with its structure.\n'
+            '2. Create a script to reproduce the error and execute it with `ruby <filename.rb>` using the BashTool, to confirm the error.\n'
+            '3. Edit the sourcecode of the repo to resolve the issue.\n'
+            '4. Rerun your reproduce script and confirm that the error is fixed!\n'
+            '5. Think about edgecases, add comprehensive tests for them in your reproduce script, and run them to make sure your fix handles them as well.\n'
+            f'6. Once you are done with the initial implementation, please carefully re-read the problem description and check the difference between the current code and the base commit {base_commit}. Do you think that the issue has been completely and comprehensively solved? Write tests to check the correctness of the solution, specifically focusing on tests that may point out any remaining problems that are not yet solved. Run all of the tests in the repo and check if any of them fail, and if they do fix the code. Repeat this process of carefully reading the problem description and current implementation, testing, and fixing any problems until you are confident that the current implementation is correct. Find and run any tests in the repo that are related to:\n'
+            '   - The issue you are fixing\n'
+            '   - The files you modified\n'
+            '   - The functions you changed\n'
+            '   Make sure all these tests pass with your changes.\n'
+            "Your thinking should be thorough and so it's fine if it's very long.\n"
+        ),
+        'php': (
+            f'<uploaded_files>\n{workspace_path}\n</uploaded_files>\n'
+            f"I've uploaded a PHP code repository in the directory {workspace_path}. Consider the following issue description:\n\n"
+            f'<issue_description>\n{problem}\n</issue_description>\n\n'
+            'Can you help me implement the necessary changes to the repository so that the requirements specified in the <issue_description> are met?\n'
+            "I've already taken care of all changes to any of the test files described in the <issue_description>. This means you DON'T have to modify the testing logic or any of the tests in any way!\n"
+            "Also the development PHP environment is already set up for you (i.e., all dependencies already installed), so you don't need to install other packages.\n"
+            'Your task is to make the minimal changes to non-test files in the /workspace directory to ensure the <issue_description> is satisfied.\n'
+            'Follow these steps to resolve the issue:\n'
+            '1. As a first step, it might be a good idea to explore the repo to familiarize yourself with its structure.\n'
+            '2. Create a script to reproduce the error and execute it with `php <filename.php>` using the BashTool, to confirm the error.\n'
+            '3. Edit the sourcecode of the repo to resolve the issue.\n'
+            '4. Rerun your reproduce script and confirm that the error is fixed!\n'
+            '5. Think about edgecases, add comprehensive tests for them in your reproduce script, and run them to make sure your fix handles them as well.\n'
+            f'6. Once you are done with the initial implementation, please carefully re-read the problem description and check the difference between the current code and the base commit {base_commit}. Do you think that the issue has been completely and comprehensively solved? Write tests to check the correctness of the solution, specifically focusing on tests that may point out any remaining problems that are not yet solved. Run all of the tests in the repo and check if any of them fail, and if they do fix the code. Repeat this process of carefully reading the problem description and current implementation, testing, and fixing any problems until you are confident that the current implementation is correct. Find and run any tests in the repo that are related to:\n'
+            '   - The issue you are fixing\n'
+            '   - The files you modified\n'
+            '   - The functions you changed\n'
+            '   Make sure all these tests pass with your changes.\n'
+            "Your thinking should be thorough and so it's fine if it's very long.\n"
+        ),
+    }
+
+    # Language-agnostic fallback
+    default_instruction = (
+        f'<uploaded_files>\n{workspace_path}\n</uploaded_files>\n'
+        f"I've uploaded a code repository in the directory {workspace_path}. Consider the following issue description:\n\n"
+        f'<issue_description>\n{problem}\n</issue_description>\n\n'
+        'Can you help me implement the necessary changes to the repository so that the requirements specified in the <issue_description> are met?\n'
+        "I've already taken care of all changes to any of the test files described in the <issue_description>. This means you DON'T have to modify the testing logic or any of the tests in any way!\n"
+        "Also the development environment is already set up for you (i.e., all dependencies already installed), so you don't need to install other packages.\n"
+        'Your task is to make the minimal changes to non-test files in the /workspace directory to ensure the <issue_description> is satisfied.\n'
+        'Follow these steps to resolve the issue:\n'
+        '1. As a first step, it might be a good idea to explore the repo to familiarize yourself with its structure.\n'
+        '2. Create a script to reproduce the error and execute it using the BashTool, to confirm the error.\n'
+        '3. Edit the sourcecode of the repo to resolve the issue.\n'
+        '4. Rerun your reproduce script and confirm that the error is fixed!\n'
+        '5. Think about edgecases, add comprehensive tests for them in your reproduce script, and run them to make sure your fix handles them as well.\n'
+        f'6. Once you are done with the initial implementation, please carefully re-read the problem description and check the difference between the current code and the base commit {base_commit}. Do you think that the issue has been completely and comprehensively solved? Write tests to check the correctness of the solution, specifically focusing on tests that may point out any remaining problems that are not yet solved. Run all of the tests in the repo and check if any of them fail, and if they do fix the code. Repeat this process of carefully reading the problem description and current implementation, testing, and fixing any problems until you are confident that the current implementation is correct. Find and run any tests in the repo that are related to:\n'
+        '   - The issue you are fixing\n'
+        '   - The files you modified\n'
+        '   - The functions you changed\n'
+        '   Make sure all these tests pass with your changes.\n'
+        "Your thinking should be thorough and so it's fine if it's very long.\n"
+    )
+
+    return instructions.get(LANGUAGE.lower(), default_instruction)
+
+
 def get_instruction(instance: pd.Series, metadata: EvalMetadata) -> MessageAction:
     workspace_dir_name = _get_swebench_workspace_dir_name(instance)
     workspace_path = _get_workspace_path(instance, workspace_dir_name)
+
+    # For SWE-bench_Multilingual, use per-language instruction prompts
+    if DATASET_TYPE == 'SWE-bench_Multilingual':
+        instruction = _get_multilingual_instruction(instance, workspace_dir_name)
+        if RUN_WITH_BROWSING:
+            instruction += (
+                '<IMPORTANT!>\nYou SHOULD NEVER attempt to browse the web. </IMPORTANT!>\n'
+            )
+        return MessageAction(content=instruction)
+
     mode = metadata.details['mode']
     llm_model = metadata.llm_config.model
 
@@ -331,6 +595,12 @@ def get_config(
     if DATASET_TYPE in ('SWE-rebench', 'SWE-rebench-V2'):
         # SWE-rebench instances have their own image_name field
         base_container_image = instance.get('image_name', '')
+    elif DATASET_TYPE == 'SWE-bench_Multilingual' and LANGUAGE.lower() != 'python':
+        # Multilingual non-python: use mswebench image naming convention
+        container_name = instance.get('repo', '').lower().replace('/', '_m_')
+        instance_id = instance.get('instance_id', '')
+        tag_suffix = instance_id.split('-')[-1] if instance_id else ''
+        base_container_image = f'mswebench/{container_name}:pr-{tag_suffix}'
     else:
         use_swebench_official_image = DATASET_TYPE != 'SWE-Gym'
         base_container_image = get_instance_docker_image(
@@ -723,6 +993,31 @@ def complete_runtime(
                 f'Failed to remove git directory {git_dir}: {str(obs)}',
             )
 
+    # For SWE-bench_Multilingual: run language-specific gitignore script to exclude
+    # compilation artifacts (e.g., .class, .o, target/) from the final patch.
+    # Scripts sourced from MSWE-agent: https://github.com/multi-swe-bench/MSWE-agent
+    if DATASET_TYPE == 'SWE-bench_Multilingual':
+        gitignore_script_path = os.path.join(
+            os.path.dirname(__file__), f'scripts/gitignores/{LANGUAGE}.sh'
+        )
+        if os.path.exists(gitignore_script_path):
+            # Copy the script into the runtime and execute it
+            runtime.copy_to(gitignore_script_path, '/tmp/')
+            script_name = os.path.basename(gitignore_script_path)
+            action = CmdRunAction(command=f'chmod +x /tmp/{script_name} && /tmp/{script_name}')
+            action.set_hard_timeout(600)
+            logger.info(action, extra={'msg_type': 'ACTION'})
+            obs = runtime.run_action(action)
+            logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+            assert_and_raise(
+                obs.exit_code == 0,
+                f'Failed to run gitignore script ({LANGUAGE}.sh): {str(obs)}',
+            )
+        else:
+            logger.info(
+                f"No gitignore script found for language '{LANGUAGE}'. Skipping."
+            )
+
     # add all files
     action = CmdRunAction(command='git add -A')
     action.set_hard_timeout(600)
@@ -747,9 +1042,12 @@ def complete_runtime(
 
     n_retries = 0
     git_patch = None
+    # For multilingual, exclude .gitignore from the diff since we modified it
+    # with the language-specific gitignore script
+    gitignore_exclude = " ':!.gitignore'" if DATASET_TYPE == 'SWE-bench_Multilingual' else ''
     while n_retries < 5:
         action = CmdRunAction(
-            command=f'git diff --no-color --cached {instance["base_commit"]} > patch.diff'
+            command=f'git diff --no-color --cached {instance["base_commit"]}{gitignore_exclude} > patch.diff'
         )
         action.set_hard_timeout(max(300 + 100 * n_retries, 600))
         logger.info(action, extra={'msg_type': 'ACTION'})
