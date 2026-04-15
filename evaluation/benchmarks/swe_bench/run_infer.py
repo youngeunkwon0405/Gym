@@ -466,8 +466,9 @@ def get_instruction(instance: pd.Series, metadata: EvalMetadata) -> MessageActio
     workspace_dir_name = _get_swebench_workspace_dir_name(instance)
     workspace_path = _get_workspace_path(instance, workspace_dir_name)
 
+    custom_instruction_template_path = metadata.details.get('instruction_template_path')
     # For SWE-bench_Multilingual, use per-language instruction prompts
-    if DATASET_TYPE == 'SWE-bench_Multilingual':
+    if DATASET_TYPE == 'SWE-bench_Multilingual' and not (custom_instruction_template_path and os.path.isfile(custom_instruction_template_path)):
         instruction = _get_multilingual_instruction(instance, workspace_dir_name)
         if RUN_WITH_BROWSING:
             instruction += (
