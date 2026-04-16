@@ -191,6 +191,8 @@ def set_dataset_type(dataset_name: str) -> str:
         DATASET_TYPE = 'Multimodal'
     elif 'multilingual' in name_lower:
         DATASET_TYPE = 'SWE-bench_Multilingual'
+    elif 'swe-bench-ext' in name_lower:
+        DATASET_TYPE = 'swe-bench-ext'
     else:
         DATASET_TYPE = 'SWE-bench'
 
@@ -567,7 +569,7 @@ def get_instance_docker_image(
             docker_image_prefix = 'docker.io/swebench/'
         elif DATASET_TYPE == 'SWE-rebench':
             docker_image_prefix = 'docker.io/swerebench/'
-        elif DATASET_TYPE in ['R2E-Gym', 'nv-internal-1', 'SWE-rebench-V2']:
+        elif DATASET_TYPE in ['R2E-Gym', 'nv-internal-1', 'SWE-rebench-V2', 'swe-bench-ext']:
             docker_image_prefix = 'UNAVAILABLE'
         elif DATASET_TYPE == 'SWE-bench_Multilingual':
             docker_image_prefix = 'docker.io/swebench/'
@@ -725,6 +727,8 @@ source ~/.bashrc
             entry_script_path = 'instance_swe_entry_rebench.sh'
         elif DATASET_TYPE == 'nv-internal-1':
             entry_script_path = 'instance_swe_entry_nv_internal.sh'
+        elif DATASET_TYPE == 'swe-bench-ext':
+            entry_script_path = 'instance_swe_entry_swe_ext.sh'
         elif DATASET_TYPE == 'SWE-rebench-V2':
             entry_script_path = 'instance_swe_entry_nv_internal.sh'
         elif DATASET_TYPE == 'R2E-Gym':
@@ -737,7 +741,7 @@ source ~/.bashrc
         )
 
     # These dataset types operate directly in their repo dir, skipping the copy-to-workspace step.
-    SKIP_ENTRY_SCRIPT_TYPES = ('nv-internal-1', 'SWE-rebench-V2', 'SWE-Gym', 'R2E-Gym')
+    SKIP_ENTRY_SCRIPT_TYPES = ('nv-internal-1', 'SWE-rebench-V2', 'SWE-Gym', 'R2E-Gym', 'swe-bench-ext')
 
     if DATASET_TYPE not in SKIP_ENTRY_SCRIPT_TYPES:
         action = CmdRunAction(command=f'source /swe_util/{entry_script_path}')
@@ -850,7 +854,7 @@ source ~/.bashrc
             obs = runtime.run_action(action)
             logger.info(obs, extra={'msg_type': 'OBSERVATION'})
 
-    if DATASET_TYPE not in ('Multimodal', 'SWE-bench-Live', 'nv-internal-1', 'SWE-rebench', 'SWE-rebench-V2', 'SWE-bench_Multilingual'):
+    if DATASET_TYPE not in ('Multimodal', 'SWE-bench-Live', 'nv-internal-1', 'SWE-rebench', 'SWE-rebench-V2', 'SWE-bench_Multilingual', 'swe-bench-ext'):
         # Only for non-multimodal datasets, we need to activate the testbed environment for Python
         # SWE-Bench multimodal datasets, SWE-bench-Live, nv-internal-1, and SWE-rebench are not using the testbed environment
         action = CmdRunAction(command='which python')
@@ -877,6 +881,8 @@ def _get_workspace_path(
     if DATASET_TYPE == "nv-internal-1":
         # nv-internal-1 instances operate directly out of /app instead of /workspace.
         return "/app"
+    if DATASET_TYPE == "swe-bench-ext":
+        return "/workspace/repo"
     if DATASET_TYPE == "SWE-rebench-V2":
         # SWE-rebench-V2 containers have repos directly at /{repo_name}
         repo = instance.get("repo", "")
@@ -1438,7 +1444,7 @@ if __name__ == '__main__':
         profiler.start()
 
     # Validate nv-internal-1 and SWE-rebench-V2 require instance_dict_path
-    if 'nv-internal-1' in args.dataset.lower() or 'swe-rebench-v2' in args.dataset.lower():
+    if any(dataset_type in args.dataset.lower() for dataset_type in ('nv-internal-1', 'swe-rebench-v2', 'swe-bench-ext')):
         if not args.instance_dict_path or not args.selected_id:
             raise ValueError(
                 f'{args.dataset} dataset requires both --instance-dict-path and --selected-id arguments. '
