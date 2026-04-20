@@ -573,7 +573,12 @@ def get_instance_docker_image(
             docker_image_prefix = 'UNAVAILABLE'
         elif DATASET_TYPE == 'SWE-bench_Multilingual':
             docker_image_prefix = 'docker.io/swebench/'
-        repo, name = instance_id.split('__')
+        else:
+            pass
+        if DATASET_TYPE == 'swe-bench-ext':
+            repo, name = instance_id, instance_id
+        else:
+            repo, name = instance_id.split('__')
         image_name = f'{docker_image_prefix.rstrip("/")}/sweb.eval.x86_64.{repo}_1776_{name}:latest'.lower()
         logger.debug(f'Using official SWE-Bench image: {image_name}')
         return image_name
@@ -814,21 +819,22 @@ source ~/.bashrc
         f'Failed to cd to {workspace_path}: {str(obs)}',
     )
 
-    action = CmdRunAction(command='git reset --hard')
-    action.set_hard_timeout(600)
-    logger.info(action, extra={'msg_type': 'ACTION'})
-    obs = runtime.run_action(action)
-    logger.info(obs, extra={'msg_type': 'OBSERVATION'})
-    assert_and_raise(obs.exit_code == 0, f'Failed to git reset --hard: {str(obs)}')
+    if DATASET_TYPE != "swe-bench-ext":
+        action = CmdRunAction(command='git reset --hard')
+        action.set_hard_timeout(600)
+        logger.info(action, extra={'msg_type': 'ACTION'})
+        obs = runtime.run_action(action)
+        logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+        assert_and_raise(obs.exit_code == 0, f'Failed to git reset --hard: {str(obs)}')
 
-    action = CmdRunAction(
-        command='for remote_name in $(git remote); do git remote remove "${remote_name}"; done'
-    )
-    action.set_hard_timeout(600)
-    logger.info(action, extra={'msg_type': 'ACTION'})
-    obs = runtime.run_action(action)
-    logger.info(obs, extra={'msg_type': 'OBSERVATION'})
-    assert_and_raise(obs.exit_code == 0, f'Failed to remove git remotes: {str(obs)}')
+        action = CmdRunAction(
+            command='for remote_name in $(git remote); do git remote remove "${remote_name}"; done'
+        )
+        action.set_hard_timeout(600)
+        logger.info(action, extra={'msg_type': 'ACTION'})
+        obs = runtime.run_action(action)
+        logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+        assert_and_raise(obs.exit_code == 0, f'Failed to remove git remotes: {str(obs)}')
 
     if metadata.details['mode'] == 'swt-ci':
         # set up repo
