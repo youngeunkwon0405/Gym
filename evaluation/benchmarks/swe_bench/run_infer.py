@@ -835,6 +835,32 @@ source ~/.bashrc
         obs = runtime.run_action(action)
         logger.info(obs, extra={'msg_type': 'OBSERVATION'})
         assert_and_raise(obs.exit_code == 0, f'Failed to remove git remotes: {str(obs)}')
+    else:
+        # swe-bench-ext containers typically copy flat source into the
+        # workspace with no .git directory. Bootstrap a local repo and
+        # snapshot the pristine state as `swebench_baseline` so we can diff
+        # the agent's changes against it in complete_runtime.
+        baseline_cmd = (
+            f'git config --global --add safe.directory {workspace_path} && '
+            f'cd {workspace_path} && '
+            'if [ ! -d .git ]; then '
+            '  git init -q && '
+            "  git config user.email 'eval@openhands.local' && "
+            "  git config user.name 'OpenHands Eval' && "
+            '  git add -A && '
+            "  git commit -q --allow-empty -m 'swe-bench-ext baseline' && "
+            '  git tag -f swebench_baseline HEAD; '
+            'fi'
+        )
+        action = CmdRunAction(command=baseline_cmd)
+        action.set_hard_timeout(1800)
+        logger.info(action, extra={'msg_type': 'ACTION'})
+        obs = runtime.run_action(action)
+        logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+        assert_and_raise(
+            isinstance(obs, CmdOutputObservation) and obs.exit_code == 0,
+            f'Failed to set up swebench_baseline git repo: {str(obs)}',
+        )
 
     if metadata.details['mode'] == 'swt-ci':
         # set up repo
@@ -981,6 +1007,56 @@ def complete_runtime(
         f'Failed to git config --global core.pager "": {str(obs)}',
     )
 
+    # Check whether the workspace is actually a git repository. For
+    # swe-bench-ext (and any other dataset where the container ships flat
+    # source), initialize_runtime sets up a fresh repo and tags the baseline
+    # commit as `swebench_baseline`. If neither a pre-existing .git nor that
+    # baseline tag is present, there's nothing we can diff against and we
+    # return an empty patch instead of crashing the whole instance.
+    action = CmdRunAction(command='git rev-parse --is-inside-work-tree')
+    action.set_hard_timeout(600)
+    logger.info(action, extra={'msg_type': 'ACTION'})
+    obs = runtime.run_action(action)
+    logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+    is_git_repo = (
+        isinstance(obs, CmdOutputObservation)
+        and obs.exit_code == 0
+        and obs.content.strip().endswith('true')
+    )
+    if not is_git_repo:
+        logger.warning(
+            f'Workspace {workspace_path} is not a git repository; '
+            'skipping git operations and returning an empty patch.'
+        )
+        logger.info('-' * 30)
+        logger.info('END Runtime Completion Fn')
+        logger.info('-' * 30)
+        return {'git_patch': ''}
+
+    # Prefer the swebench_baseline tag (set up by initialize_runtime for
+    # datasets that don't ship a real git history, e.g. swe-bench-ext). Fall
+    # back to instance['base_commit'] for normal datasets where the container
+    # already has the repo checked out at that SHA.
+    action = CmdRunAction(
+        command='git rev-parse --verify refs/tags/swebench_baseline'
+    )
+    action.set_hard_timeout(600)
+    logger.info(action, extra={'msg_type': 'ACTION'})
+    obs = runtime.run_action(action)
+    logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+    if (
+        isinstance(obs, CmdOutputObservation)
+        and obs.exit_code == 0
+        and obs.content.strip()
+    ):
+        diff_base_ref = 'swebench_baseline'
+        logger.info(
+            f'Using swebench_baseline tag as diff reference '
+            f'(resolved to {obs.content.strip()}).'
+        )
+    else:
+        diff_base_ref = str(instance['base_commit'])
+
     # First check for any git repositories in subdirectories
     action = CmdRunAction(command='find . -type d -name .git -not -path "./.git"')
     action.set_hard_timeout(600)
@@ -1060,7 +1136,7 @@ def complete_runtime(
     gitignore_exclude = " ':!.gitignore'" if DATASET_TYPE == 'SWE-bench_Multilingual' else ''
     while n_retries < 5:
         action = CmdRunAction(
-            command=f'git diff --no-color --cached {instance["base_commit"]}{gitignore_exclude} > patch.diff'
+            command=f'git diff --no-color --cached {diff_base_ref}{gitignore_exclude} > patch.diff'
         )
         action.set_hard_timeout(max(300 + 100 * n_retries, 600))
         logger.info(action, extra={'msg_type': 'ACTION'})
