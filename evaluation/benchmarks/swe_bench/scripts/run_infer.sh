@@ -88,6 +88,11 @@ if [ -z "$MAX_ITER" ]; then
   MAX_ITER=100
 fi
 
+if [ -z "$INCLUDE_TURNS_REMAINING_REMINDER" ]; then
+  INCLUDE_TURNS_REMAINING_REMINDER=false
+fi
+echo "INCLUDE_TURNS_REMAINING_REMINDER: $INCLUDE_TURNS_REMAINING_REMINDER"
+
 if [ -z "$RUN_WITH_BROWSING" ]; then
   echo "RUN_WITH_BROWSING not specified, use default false"
   RUN_WITH_BROWSING=false
@@ -227,6 +232,10 @@ function run_eval() {
   if [ -n "$REPLAY_MESSAGES_PATH" ]; then
     echo "REPLAY_MESSAGES_PATH: $REPLAY_MESSAGES_PATH"
     COMMAND="$COMMAND --replay-messages-path $REPLAY_MESSAGES_PATH"
+  fi
+
+  if [ "$INCLUDE_TURNS_REMAINING_REMINDER" = true ]; then
+    COMMAND="$COMMAND --include-turns-remaining-reminder"
   fi
 
   # Run the command

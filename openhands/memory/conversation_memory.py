@@ -782,6 +782,21 @@ class ConversationMemory:
             # when the LLM tries to return the next message
             raise ValueError(f'Unknown observation type: {type(obs)}')
 
+        if (
+            self.agent_config.include_turns_remaining_reminder
+            and getattr(obs, '_turns_left', None) is not None
+            and message.content
+        ):
+            reminder = (
+                f'\n\nENVIRONMENT REMINDER: You have {obs._turns_left} turns left to complete the task.'
+            )
+            for item in message.content:
+                if isinstance(item, TextContent):
+                    item.text += reminder
+                    break
+            else:
+                message.content.append(TextContent(text=reminder))
+
         # Update the message as tool response properly
         if (tool_call_metadata := getattr(obs, 'tool_call_metadata', None)) is not None:
             tool_call_id_to_message[tool_call_metadata.tool_call_id] = Message(

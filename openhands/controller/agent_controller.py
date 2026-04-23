@@ -484,6 +484,10 @@ class AgentController:
 
         self.state_tracker.add_history(event)
 
+        if isinstance(event, Observation):
+            flag = self.state.iteration_flag
+            setattr(event, '_turns_left', max(0, flag.max_value - flag.current_value))
+
         if isinstance(event, Action):
             await self._handle_action(event)
         elif isinstance(event, Observation):

@@ -57,6 +57,8 @@ class AgentConfig(BaseModel):
     """Whether to enable SoM (Set of Marks) visual browsing."""
     enable_plan_mode: bool = Field(default=True)
     """Whether to enable plan mode, which uses the long horizon system message and add the new tool - task_tracker - for planning, tracking and executing complex tasks."""
+    include_turns_remaining_reminder: bool = Field(default=False)
+    """If True, append 'ENVIRONMENT REMINDER: You have X turns left to complete the task.' to every observation shown to the LLM, where X is frozen to the turns-remaining value at the time the observation was produced."""
     condenser: CondenserConfig = Field(
         # The default condenser is set to the conversation window condenser -- if
         # we use NoOp and the conversation hits the LLM context length limit,

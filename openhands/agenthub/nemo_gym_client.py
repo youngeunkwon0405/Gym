@@ -96,6 +96,11 @@ class NemoGymClient:
             elif all(field in message for field in fields_to_remove):
                 last_occurrence_idx_seen = True
 
+        # Measure per-call round-trip latency so it's surfaced in
+        # `Metrics.response_latencies` (and therefore in the eval output.jsonl
+        # via `get_metrics(state)`), mirroring the litellm path in
+        # `openhands/llm/llm.py::_completion`.
+        latency_start = time.perf_counter()
         model_response = await self.ng_server_client.post(
             server_name=os.getenv("NEMO_GYM_MODEL_SERVER_NAME"),
             url_path="/v1/chat/completions",
@@ -104,6 +109,10 @@ class NemoGymClient:
         )
         await raise_for_status(model_response)
         model_response_json = await get_response_json(model_response)
+        latency = time.perf_counter() - latency_start
+        self.llm.metrics.add_response_latency(
+            latency, model_response_json.get("id", "unknown")
+        )
         self.model_server_cookies = model_response.cookies
 
         response: ModelResponse = ModelResponse.model_validate(model_response_json)

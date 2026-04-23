@@ -639,6 +639,42 @@ def get_config(
         sandbox_config=sandbox_config,
     )
 
+    # Optional override for the OpenHands file store location (where
+    # `sessions/<id>/events/*.json` get written). By default
+    # get_openhands_config_for_eval() plants this at `$CWD/.eval_sessions`,
+    # which is noisy when running eval from the repo root. Set
+    # EVAL_FILE_STORE_PATH=/some/path to redirect it anywhere you like.
+    # Supports `~` expansion and relative paths (resolved against CWD).
+    custom_file_store_path = os.environ.get('EVAL_FILE_STORE_PATH')
+    if custom_file_store_path:
+        custom_file_store_path = os.path.abspath(
+            os.path.expanduser(custom_file_store_path)
+        )
+        os.makedirs(custom_file_store_path, exist_ok=True)
+        config.file_store_path = custom_file_store_path
+        logger.info(
+            f'Overriding eval file_store_path via EVAL_FILE_STORE_PATH: '
+            f'{config.file_store_path}'
+        )
+
+    # Optional toggle to disable the on-disk file store entirely. When set,
+    # OpenHands swaps LocalFileStore for InMemoryFileStore, so no session
+    # JSONs are written to disk. openhands/core/main.py already guards its
+    # end-of-run save_to_session() call with `config.file_store != 'memory'`,
+    # so the agent loop itself is unaffected — event subscribers (controller,
+    # memory, condenser) keep working because they read/write through the
+    # same (now in-memory) FileStore abstraction. Trade-off: you lose on-disk
+    # session replay/recovery for the run; infer_logs/ and llm_completions/
+    # are unaffected and `history` is still captured in output.jsonl.
+    if os.environ.get('EVAL_DISABLE_FILE_STORE', 'true').lower() in (
+        '1', 'true', 'yes',
+    ):
+        config.file_store = 'memory'
+        logger.info(
+            'EVAL_DISABLE_FILE_STORE set: using InMemoryFileStore '
+            '(no session JSONs will be written to disk).'
+        )
+
     config.set_llm_config(
         update_llm_config_for_completions_logging(
             metadata.llm_config, metadata.eval_output_dir, instance['instance_id']
@@ -665,6 +701,7 @@ def get_config(
         else 'system_prompt.j2',
         system_prompt_path=SYSTEM_PROMPT_PATH,
         system_prompt_long_horizon_path=SYSTEM_PROMPT_LONG_HORIZON_PATH,
+        include_turns_remaining_reminder=INCLUDE_TURNS_REMAINING_REMINDER,
     )
     config.set_agent_config(agent_config)
 
@@ -1452,11 +1489,12 @@ def filter_dataset(
 
 if __name__ == '__main__':
     # Declare globals at the start of the block
-    global SYSTEM_PROMPT_PATH, SYSTEM_PROMPT_LONG_HORIZON_PATH
+    global SYSTEM_PROMPT_PATH, SYSTEM_PROMPT_LONG_HORIZON_PATH, INCLUDE_TURNS_REMAINING_REMINDER
 
     # Module-level variables to store custom prompt paths
     SYSTEM_PROMPT_PATH = None
     SYSTEM_PROMPT_LONG_HORIZON_PATH = None
+    INCLUDE_TURNS_REMAINING_REMINDER = False
 
     parser = get_evaluation_parser()
     parser.add_argument(
@@ -1514,8 +1552,15 @@ if __name__ == '__main__':
         default=None,
         help='Path to a JSON file with raw LLM messages (OpenAI chat format) to replay before continuing.',
     )
+    parser.add_argument(
+        '--include-turns-remaining-reminder',
+        action='store_true',
+        default=False,
+        help='If set, append "ENVIRONMENT REMINDER: You have X turns left to complete the task." to every observation shown to the LLM.',
+    )
 
     args, _ = parser.parse_known_args()
+    INCLUDE_TURNS_REMAINING_REMINDER = args.include_turns_remaining_reminder
 
     maybe_base_profile_dir = os.environ.get("NG_PROFILING_DIR")
     should_profile = maybe_base_profile_dir is not None
