@@ -234,7 +234,7 @@ function run_eval() {
     COMMAND="$COMMAND --replay-messages-path $REPLAY_MESSAGES_PATH"
   fi
 
-  if [ "$INCLUDE_TURNS_REMAINING_REMINDER" = true ]; then
+  if [[ "${INCLUDE_TURNS_REMAINING_REMINDER,,}" = "true" || "$INCLUDE_TURNS_REMAINING_REMINDER" = "1" ]]; then
     COMMAND="$COMMAND --include-turns-remaining-reminder"
   fi
 
