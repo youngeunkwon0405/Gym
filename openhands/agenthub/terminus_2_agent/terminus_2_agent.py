@@ -36,6 +36,7 @@ from openhands.utils.prompt import PromptManager
 
 MAX_OUTPUT_BYTES = 10000
 MAX_LLM_RETRY = 3
+COMMAND_EXEC_TIMEOUT = int(os.getenv('COMMAND_EXEC_TIMEOUT', '300'))
 
 TIMEOUT_TEMPLATE = (
     'Previous command:\n{command}\n\n'
@@ -170,7 +171,7 @@ class Terminus2Agent(Agent):
         for i, cmd in enumerate(commands):
             action = Terminus2CmdRunAction(
                 keystrokes=cmd.keystrokes,
-                duration=min(cmd.duration, 60),
+                duration=min(cmd.duration, COMMAND_EXEC_TIMEOUT),
                 thought=response_text if i == 0 else '',
             )
             self.pending_actions.append(action)
@@ -366,7 +367,7 @@ class Terminus2Agent(Agent):
         if timed_out:
             return TIMEOUT_TEMPLATE.format(
                 command=keystrokes,
-                timeout_sec=60,
+                timeout_sec=COMMAND_EXEC_TIMEOUT,
                 terminal_state=self._limit_output_length(terminal_output),
             )
         return self._limit_output_length(terminal_output)
@@ -408,7 +409,7 @@ class Terminus2Agent(Agent):
                 logger.info(f'Terminus-2 parse warnings: {result.warning}')
 
             commands = [
-                ParsedCommand(keystrokes=cmd.keystrokes, duration=min(cmd.duration, 60))
+                ParsedCommand(keystrokes=cmd.keystrokes, duration=min(cmd.duration, COMMAND_EXEC_TIMEOUT))
                 for cmd in result.commands
             ]
             return commands, result.is_task_complete, response_text
