@@ -857,6 +857,14 @@ source ~/.bashrc
     )
 
     if DATASET_TYPE != "swe-bench-ext":
+        # Deep-clean the git state so the agent cannot inspect commits past
+        # the task's base_commit via local refs, tags, reflog, or dangling
+        # objects. Remote access is blocked by removing remotes (below) and
+        # by runtime command blacklist rules that forbid --all/--branches/
+        # --remotes/--tags, explicit SHAs, origin/*, etc.
+        base_commit = instance['base_commit']
+
+        # 1) Discard uncommitted working-tree changes.
         action = CmdRunAction(command='git reset --hard')
         action.set_hard_timeout(600)
         logger.info(action, extra={'msg_type': 'ACTION'})
@@ -864,6 +872,7 @@ source ~/.bashrc
         logger.info(obs, extra={'msg_type': 'OBSERVATION'})
         assert_and_raise(obs.exit_code == 0, f'Failed to git reset --hard: {str(obs)}')
 
+        # 2) Remove all remotes so remote-tracking refs can no longer resolve.
         action = CmdRunAction(
             command='for remote_name in $(git remote); do git remote remove "${remote_name}"; done'
         )
@@ -872,6 +881,120 @@ source ~/.bashrc
         obs = runtime.run_action(action)
         logger.info(obs, extra={'msg_type': 'OBSERVATION'})
         assert_and_raise(obs.exit_code == 0, f'Failed to remove git remotes: {str(obs)}')
+
+        # 3) Pin HEAD at base_commit and delete every local ref that could
+        # reach commits past base_commit: branches, tags, stash, notes, and
+        # any stray remote-tracking refs. Then move the original branch back
+        # to base_commit so HEAD is symbolic again.
+        deep_reset_cmd = (
+    f'BASE=$(git rev-parse --verify {base_commit}^{{commit}}) && '
+    'echo "Base commit: $BASE" && '
+
+    # Capture the branch HEAD currently points at (before we detach below).
+    # Falls back to `main` if HEAD is already detached on entry.
+    'ORIG_BRANCH=$(git symbolic-ref --short -q HEAD || echo main) && '
+    'echo "Original branch: $ORIG_BRANCH" && '
+
+    # Detach so the current branch can be moved safely.
+    'git checkout --detach "$BASE" && '
+
+    'echo && '
+    'echo "Resetting local branches that are descendants of base..." && '
+
+    # Keep local branches, but reset any branch after BASE back to BASE.
+    'git for-each-ref --format="%(refname)" refs/heads | while read -r ref; do '
+    'tip="$(git rev-parse -q --verify "$ref^{commit}" 2>/dev/null || true)"; '
+    '[ -z "$tip" ] && continue; '
+    'if [ "$tip" != "$BASE" ] && git merge-base --is-ancestor "$BASE" "$tip"; then '
+    'echo "reset $ref -> $BASE"; '
+    'git update-ref "$ref" "$BASE"; '
+    'else '
+    'echo "keep $ref"; '
+    'fi; '
+    'done && '
+
+    'echo && '
+    'echo "Deleting tags, remote-tracking refs, stash, and other refs after base..." && '
+
+    # Delete non-local-branch refs after BASE.
+    'git for-each-ref --format="%(refname)" refs | while read -r ref; do '
+    'case "$ref" in refs/heads/*) continue ;; esac; '
+    'if git symbolic-ref -q "$ref" >/dev/null 2>&1; then '
+    'echo "skip symbolic ref $ref"; '
+    'continue; '
+    'fi; '
+    'tip="$(git rev-parse -q --verify "$ref^{commit}" 2>/dev/null || true)"; '
+    '[ -z "$tip" ] && continue; '
+    'if [ "$tip" != "$BASE" ] && git merge-base --is-ancestor "$BASE" "$tip"; then '
+    'echo "delete $ref"; '
+    'git update-ref -d "$ref"; '
+    'else '
+    'echo "keep $ref"; '
+    'fi; '
+    'done && '
+
+    'echo && '
+    'echo "Removing temporary Git operation refs..." && '
+
+    'git_dir=$(git rev-parse --git-dir) && '
+    'rm -f "$git_dir"/FETCH_HEAD "$git_dir"/ORIG_HEAD '
+    '"$git_dir"/MERGE_HEAD "$git_dir"/CHERRY_PICK_HEAD '
+    '"$git_dir"/REVERT_HEAD "$git_dir"/BISECT_HEAD '
+    '"$git_dir"/AUTO_MERGE && '
+
+    'echo && '
+    'echo "Expiring reflogs..." && '
+    'git reflog expire --expire=now --expire-unreachable=now --all && '
+
+    'echo && '
+    'echo "Pruning unreachable objects..." && '
+    'git repack -ad && '
+    'git prune --expire=now && '
+    'git gc --prune=now && '
+
+    'echo && '
+    'echo "Checking out $ORIG_BRANCH at base..." && '
+    'git checkout -B "$ORIG_BRANCH" "$BASE" && '
+
+    'echo && '
+    'echo "Done." && '
+    'echo "Local branches were preserved." && '
+    'echo "Tags/remotes/other refs after base were deleted."'
+        )
+
+        action = CmdRunAction(command=deep_reset_cmd)
+        action.set_hard_timeout(600)
+        logger.info(action, extra={'msg_type': 'ACTION'})
+        obs = runtime.run_action(action)
+        logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+        assert_and_raise(
+            obs.exit_code == 0,
+            f'Failed to deep-reset git refs to base_commit: {str(obs)}',
+        )
+
+        # 4) Expire reflog so past HEAD positions cannot be walked.
+        action = CmdRunAction(
+            command=(
+                'git reflog expire --expire=now --all && '
+                'git reflog expire --expire-unreachable=now --all'
+            )
+        )
+        action.set_hard_timeout(600)
+        logger.info(action, extra={'msg_type': 'ACTION'})
+        obs = runtime.run_action(action)
+        logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+        assert_and_raise(obs.exit_code == 0, f'Failed to expire reflog: {str(obs)}')
+
+        # 5) Prune dangling objects. After steps 1-4 every commit past
+        # base_commit is unreachable; `git gc --prune=now` deletes them from
+        # the object database so `git cat-file -p <sha>` and
+        # `git fsck --lost-found` cannot resurrect them.
+        action = CmdRunAction(command='git gc --prune=now')
+        action.set_hard_timeout(900)
+        logger.info(action, extra={'msg_type': 'ACTION'})
+        obs = runtime.run_action(action)
+        logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+        assert_and_raise(obs.exit_code == 0, f'Failed to git gc --prune=now: {str(obs)}')
     else:
         # swe-bench-ext containers typically copy flat source into the
         # workspace with no .git directory. Bootstrap a local repo and

@@ -181,6 +181,125 @@ COMMAND_BLACKLIST: list[BlacklistEntry] = [
         ),
         description="Blocks dd commands that write to disk devices",
     ),
+    # ==================================================================
+    # === Git network access (remote fetches). =========================
+    # ==================================================================
+    # The task container's local git state is wiped by run_infer.py
+    # (branches, tags, stash, notes, reflog, and dangling objects are all
+    # deleted so nothing past `base_commit` is reachable locally). The
+    # only remaining leak channel is going out over the network to fetch
+    # post-base history from a remote. These rules block every git
+    # subcommand or flag that can pull commits/refs from a remote URL.
+    # === git fetch / pull / clone / ls-remote ===
+    # The negative lookbehind `(?<!["'=\w])` ensures the subcommand word is
+    # not preceded by `=`, `"`, `'`, or another word-char — i.e. not inside
+    # a flag value like `--grep="fetch"` or `-S "clone"`.
+    BlacklistEntry(
+        pattern=r"\bgit\b[^\n|;&]*?(?<![\"'=\w])(?:fetch|pull|clone|ls-remote)\b",
+        feedback=(
+            "ERROR: Git network commands are blocked.\n"
+            "`git fetch`, `git pull`, `git clone`, and `git ls-remote` reach out "
+            "to a remote and can pull commits that post-date this task's base "
+            "commit, which would leak the solution.\n\n"
+            "SUGGESTION: Work entirely within the local checkout. Read source "
+            "files directly instead of fetching remote state."
+        ),
+        description="Blocks git fetch/pull/clone/ls-remote",
+    ),
+    # === git remote add / set-url / update / rename / set-branches ===
+    BlacklistEntry(
+        pattern=r"\bgit\s+remote\s+(?:add|set-url|set-head|update|rename|set-branches)\b",
+        feedback=(
+            "ERROR: Configuring a git remote is blocked.\n"
+            "Adding or re-pointing a remote is the prelude to fetching post-base "
+            "commits from the network, which would leak the solution.\n\n"
+            "SUGGESTION: Work entirely within the local checkout."
+        ),
+        description="Blocks git remote add/set-url/set-head/update/rename/set-branches",
+    ),
+    # === git submodule update/sync/add (all can fetch over the network) ===
+    BlacklistEntry(
+        pattern=r"\bgit\s+submodule\s+(?:add|update|sync|init)\b",
+        feedback=(
+            "ERROR: `git submodule` operations that touch the network are blocked.\n"
+            "Submodule add/update/sync/init can fetch arbitrary commits from "
+            "remote URLs, which would leak post-base-commit state.\n\n"
+            "SUGGESTION: Do not initialize or update submodules."
+        ),
+        description="Blocks git submodule add/update/sync/init",
+    ),
+    # === git archive --remote=<url> ===
+    BlacklistEntry(
+        pattern=r"\bgit\s+archive\b[^\n|;&]*\s--remote\b",
+        feedback=(
+            "ERROR: `git archive --remote=<url>` is blocked.\n"
+            "It fetches a tree from a remote, which can leak post-base-commit "
+            "state.\n\n"
+            "SUGGESTION: Use a local checkout; do not read remote archives."
+        ),
+        description="Blocks git archive --remote",
+    ),
+    # === Any git invocation that contains a remote URL (https://, git://,
+    # ssh://, or git@host:path). This is a belt-and-suspenders catch for
+    # forms like `git <sub> <URL>` that aren't covered above. The negative
+    # lookbehind avoids matching URLs that appear inside flag values like
+    # `-S "http://example"` or `--grep="https://..."`. ===
+    BlacklistEntry(
+        pattern=r"\bgit\b[^\n|;&]*?(?<![\"'=\w])(?:https?|git|ssh|ftp|ftps)://",
+        feedback=(
+            "ERROR: This git command references a remote URL.\n"
+            "Any git subcommand that includes an http(s)/git/ssh URL can pull "
+            "remote state, leaking post-base-commit commits.\n\n"
+            "SUGGESTION: Work within the local checkout only."
+        ),
+        description="Blocks git commands that reference a remote URL (https/git/ssh/ftp)",
+    ),
+    BlacklistEntry(
+        pattern=r"\bgit\b[^\n|;&]*?(?<![\"'=\w])git@[\w\.\-]+:",
+        feedback=(
+            "ERROR: This git command references a git-over-SSH URL.\n"
+            "Any git subcommand with a `git@host:path` URL can pull remote "
+            "state, leaking post-base-commit commits.\n\n"
+            "SUGGESTION: Work within the local checkout only."
+        ),
+        description="Blocks git commands that reference a git@host:path URL",
+    ),
+    # === References to remote-tracking refs (origin/..., upstream/..., remotes/<name>/...).
+    # Post-cleanup these refs should not exist; this rule is a belt-and-
+    # suspenders block in case any slip through. ===
+    BlacklistEntry(
+        pattern=r"\bgit\s+\S+\b[^\n|;&]*\b(?:origin|upstream|remotes/[^\s/]+)/[\w./\-]+",
+        feedback=(
+            "ERROR: This git command references a remote-tracking ref.\n"
+            "`origin/…`, `upstream/…`, and `remotes/<name>/…` point to commits "
+            "that live on a remote and may post-date the task's base commit.\n\n"
+            "SUGGESTION: Work locally against HEAD; do not reference remote refs."
+        ),
+        description="Blocks git commands that reference origin/upstream/remotes/<name>",
+    ),
+    # ==================================================================
+    # === Online solution lookups via curl / wget. =====================
+    # ==================================================================
+    # Block fetching anything from github.com (including subdomains like
+    # api.github.com, gist.github.com, codeload.github.com), the static-content
+    # host githubusercontent.com (raw.*, gist.*, objects.*), and github.io
+    # (Pages). The agent could otherwise grab the upstream repo's commit
+    # history, PRs, issue threads, or the maintainer's gists to look up the
+    # task's solution. The `[^\n|;&]*` body anchors the URL to the same
+    # command segment as `curl`/`wget` so cross-pipe usage like
+    # `cat README | grep github.com` is not blocked.
+    BlacklistEntry(
+        pattern=r"\b(?:curl|wget)\b[^\n|;&]*\b(?:github\.com|githubusercontent\.com|github\.io)\b",
+        feedback=(
+            "ERROR: Reaching out to GitHub is not allowed.\n"
+            "You are not allowed to look up the solution online. Fetching from "
+            "github.com / githubusercontent.com / github.io (commit history, "
+            "PRs, issues, gists, raw files) is restricted"
+            "evaluation.\n\n"
+            "SUGGESTION: Solve the problem using only the local checkout."
+        ),
+        description="Blocks curl/wget to github.com and related GitHub domains",
+    ),
 ]
 
 
