@@ -2236,8 +2236,8 @@ class ActionExecutor:
             root@hostname:/app/src#
         """
         meta = obs.metadata
-        username = meta.username or 'root'
-        hostname = meta.hostname or 'sandbox'
+        username = 'root'
+        hostname = 'sandbox'
         post_cwd = meta.working_dir or '/'
         suffix = '#' if username == 'root' else '$'
 
