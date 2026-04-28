@@ -28,6 +28,7 @@ from openhands.events.action.terminus_2 import Terminus2CmdRunAction
 from openhands.events.event import Event, EventSource
 from openhands.events.observation.error import ErrorObservation
 from openhands.events.observation.terminus_2 import Terminus2CmdOutputObservation
+from openhands.events.tool import ToolCallMetadata
 from openhands.memory.condenser import Condenser
 from openhands.memory.condenser.condenser import Condensation, View
 from openhands.runtime.plugins import PluginRequirement
@@ -158,32 +159,83 @@ class Terminus2Agent(Agent):
 
         messages = self._build_messages(condensed_history, state)
 
-        commands, is_task_complete, response_text = await self._call_llm_and_parse(messages)
+        commands, is_task_complete, response_text, model_response = (
+            await self._call_llm_and_parse(messages)
+        )
 
         if is_task_complete:
             if self._pending_completion:
-                return AgentFinishAction(thought='Task completed (confirmed)')
+                finish = AgentFinishAction(thought='Task completed (confirmed)')
+                self._attach_response_metadata(finish, model_response, total_calls=0)
+                return finish
             else:
                 self._pending_completion = True
         else:
             self._pending_completion = False
 
+        total_calls = len(commands)
         for i, cmd in enumerate(commands):
             action = Terminus2CmdRunAction(
                 keystrokes=cmd.keystrokes,
                 duration=min(cmd.duration, COMMAND_EXEC_TIMEOUT),
                 thought=response_text if i == 0 else '',
             )
+            self._attach_response_metadata(action, model_response, total_calls=total_calls)
             self.pending_actions.append(action)
 
         if not self.pending_actions:
             if self._pending_completion:
-                return Terminus2CmdRunAction(
+                noop = Terminus2CmdRunAction(
                     keystrokes='', duration=0.5, thought=response_text
                 )
-            return AgentThinkAction(thought='No commands to execute, waiting for next input')
+                self._attach_response_metadata(noop, model_response, total_calls=0)
+                return noop
+            think = AgentThinkAction(thought='No commands to execute, waiting for next input')
+            self._attach_response_metadata(think, model_response, total_calls=0)
+            return think
 
         return self.pending_actions.popleft()
+
+    @staticmethod
+    def _assistant_message_from_event(event: Event, text: str) -> Message:
+        """Rebuild an assistant Message from a stored event, preserving the
+        prompt/generation token ids and logprobs that NemoGymClient stashes on
+        the response's `_provider_specific_fields`. Without this, the assistant
+        turn echoed back to the next LLM call would lose the per-turn token
+        metadata, even when the action itself carries `tool_call_metadata`.
+        """
+        provider_fields: dict = {}
+        metadata = getattr(event, 'tool_call_metadata', None)
+        if metadata is not None and metadata.model_response is not None:
+            provider_fields = getattr(
+                metadata.model_response, '_provider_specific_fields', None
+            ) or {}
+        return Message(
+            role='assistant',
+            content=[TextContent(text=text)],
+            prompt_token_ids=provider_fields.get('prompt_token_ids'),
+            generation_token_ids=provider_fields.get('generation_token_ids'),
+            generation_log_probs=provider_fields.get('generation_log_probs'),
+        )
+
+    @staticmethod
+    def _attach_response_metadata(
+        action: 'Action', model_response: object | None, total_calls: int
+    ) -> None:
+        """Attach the LLM response to the action so prompt/generation token ids
+        and logprobs flow into the trajectory, mirroring the CodeAct/OpenCode
+        pattern (function_calling.py:349-373). Without this, NemoGymClient's
+        `_provider_specific_fields` is dropped after each LLM call.
+        """
+        if model_response is None:
+            return
+        action.tool_call_metadata = ToolCallMetadata(
+            model_response=model_response,
+            total_calls_in_response=total_calls,
+        )
+        response_id = getattr(model_response, 'id', None)
+        if response_id is not None:
+            action.response_id = response_id
 
     def _build_messages(
         self, condensed_history: list[Event], state: State
@@ -240,10 +292,7 @@ class Terminus2Agent(Agent):
                         last_timed_out = False
 
                     messages.append(
-                        Message(
-                            role='assistant',
-                            content=[TextContent(text=event.content)],
-                        )
+                        self._assistant_message_from_event(event, event.content)
                     )
 
             elif isinstance(event, Terminus2CmdRunAction):
@@ -262,10 +311,7 @@ class Terminus2Agent(Agent):
                         last_timed_out = False
 
                     messages.append(
-                        Message(
-                            role='assistant',
-                            content=[TextContent(text=event.thought)],
-                        )
+                        self._assistant_message_from_event(event, event.thought)
                     )
                 last_keystrokes = event.keystrokes
 
@@ -374,15 +420,18 @@ class Terminus2Agent(Agent):
 
     async def _call_llm_and_parse(
         self, messages: list[Message]
-    ) -> tuple[list[ParsedCommand], bool, str]:
+    ) -> tuple[list[ParsedCommand], bool, str, object | None]:
         """Call the LLM and parse the JSON response, with retry on parse errors.
 
-        Returns (commands, is_task_complete, response_text) where response_text
-        is the raw LLM output that must be stored on the first action's thought
-        field so _build_messages can reconstruct the assistant turn later.
+        Returns (commands, is_task_complete, response_text, model_response).
+        The model_response is the raw litellm ModelResponse — callers attach it
+        to actions via ToolCallMetadata so prompt/generation token ids and
+        logprobs are persisted on the trajectory, matching CodeAct/OpenCode.
         """
+        last_response: object | None = None
         for attempt in range(MAX_LLM_RETRY):
             response = await self.nemo_gym_client.model_call(messages)
+            last_response = response
 
             response_text = response.choices[0].message.content or ''
             logger.debug(f'Terminus-2 LLM response (attempt {attempt + 1}): {response_text[:200]}...')
@@ -412,10 +461,10 @@ class Terminus2Agent(Agent):
                 ParsedCommand(keystrokes=cmd.keystrokes, duration=min(cmd.duration, COMMAND_EXEC_TIMEOUT))
                 for cmd in result.commands
             ]
-            return commands, result.is_task_complete, response_text
+            return commands, result.is_task_complete, response_text, response
 
         logger.error('Terminus-2: exhausted LLM retries due to parse errors')
-        return [], False, ''
+        return [], False, '', last_response
 
     @staticmethod
     def _limit_output_length(output: str, max_bytes: int = MAX_OUTPUT_BYTES) -> str:
