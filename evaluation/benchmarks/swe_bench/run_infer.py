@@ -708,6 +708,69 @@ def get_config(
     return config
 
 
+def _interrupt_stuck_command(runtime: Runtime) -> None:
+    """Free the tmux session when a previous command timed out but is still running.
+
+    The runtime rejects new commands with "previous command still running"
+    until the stuck process exits. We escalate via is_input=True (which
+    bypasses that guard and writes keystrokes straight to the tmux pane)
+    and probe with `true` between attempts to check shell responsiveness:
+
+      1. C-c                 (SIGINT — kills most well-behaved processes)
+      2. C-c x4              (some processes swallow the first SIGINT,
+                              e.g. pytest's graceful-then-abort flow)
+      3. C-z + `kill -9 %%`  (SIGTSTP suspends the foreground job and
+                              returns the shell prompt; SIGKILL on `%%`
+                              — bash's "current job", i.e. the one we
+                              just suspended — terminates it for good)
+
+    Best-effort; logs a warning if all escalations fail. Never raises.
+    """
+    def _shell_responsive() -> bool:
+        # `true` is a no-op. Goes through the same "previous command still
+        # running" guard as any other command, so if it returns 0 the shell
+        # is genuinely free to accept new commands.
+        probe = CmdRunAction(command='true')
+        probe.set_hard_timeout(15)
+        obs = runtime.run_action(probe)
+        return isinstance(obs, CmdOutputObservation) and obs.exit_code == 0
+
+    logger.info(
+        'Previous command timed out and is still running; '
+        'sending C-c (is_input=True) to interrupt...'
+    )
+    runtime.run_action(CmdRunAction(command='C-c', is_input=True))
+    if _shell_responsive():
+        return
+
+    logger.info('First C-c did not free the shell; sending C-c x4...')
+    for _ in range(4):
+        runtime.run_action(CmdRunAction(command='C-c', is_input=True))
+    if _shell_responsive():
+        return
+
+    logger.info(
+        'Repeated C-c did not free the shell; sending C-z to suspend and '
+        'kill -9 %% to terminate the suspended job...'
+    )
+    runtime.run_action(CmdRunAction(command='C-z', is_input=True))
+    # After C-z the foreground job is stopped and the shell prompt returns,
+    # so a normal (non-is_input) command goes through. `%%` is bash's
+    # "current job" — always the most recently suspended/backgrounded one,
+    # so it picks our suspended job regardless of any other jobs that might
+    # be lingering in the session. Suppress kill's "no such job" error if
+    # the suspend was actually a clean exit.
+    runtime.run_action(CmdRunAction(command='kill -9 %% 2>/dev/null; true'))
+    if _shell_responsive():
+        return
+
+    logger.warning(
+        'Shell is still unresponsive after C-c, C-c x4, and C-z + kill -9 %%. '
+        'Subsequent commands will likely fail; relying on top-level retry.'
+    )
+
+
+
 def _deep_reset_to_base_commit(runtime: Runtime, base_commit: str) -> None:
     # 2) Remove all remotes so remote-tracking refs can no longer resolve.
     action = CmdRunAction(
@@ -717,6 +780,8 @@ def _deep_reset_to_base_commit(runtime: Runtime, base_commit: str) -> None:
     logger.info(action, extra={'msg_type': 'ACTION'})
     obs = runtime.run_action(action)
     logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+    if obs.exit_code == -1:
+        _interrupt_stuck_command(runtime)
     assert_and_raise(obs.exit_code == 0, f'Failed to remove git remotes: {str(obs)}')
 
     # 3) Pin HEAD at base_commit and delete every local ref that could
@@ -806,6 +871,11 @@ def _deep_reset_to_base_commit(runtime: Runtime, base_commit: str) -> None:
     logger.info(obs, extra={'msg_type': 'OBSERVATION'})
 
     if obs.exit_code != 0:
+        # If the per-ref iteration hit its 600 s timeout, the loop is still
+        # running in tmux and would block the fallback. Kill it first.
+        if obs.exit_code == -1:
+            _interrupt_stuck_command(runtime)
+
         # Fallback: the careful per-ref pass timed out or otherwise failed.
         # This happens reliably on monorepos with thousands of refs (e.g.
         # DataDog/datadog-agent has 5,000+ release tags whose per-ref
@@ -860,6 +930,8 @@ def _deep_reset_to_base_commit(runtime: Runtime, base_commit: str) -> None:
         logger.info(action, extra={'msg_type': 'ACTION'})
         obs = runtime.run_action(action)
         logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+        if obs.exit_code == -1:
+            _interrupt_stuck_command(runtime)
 
     # 4) Expire reflog so past HEAD positions cannot be walked.
     action = CmdRunAction(
@@ -872,6 +944,8 @@ def _deep_reset_to_base_commit(runtime: Runtime, base_commit: str) -> None:
     logger.info(action, extra={'msg_type': 'ACTION'})
     obs = runtime.run_action(action)
     logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+    if obs.exit_code == -1:
+        _interrupt_stuck_command(runtime)
     assert_and_raise(obs.exit_code == 0, f'Failed to expire reflog: {str(obs)}')
 
     # 5) Prune dangling objects. After steps 1-4 every commit past
@@ -883,6 +957,8 @@ def _deep_reset_to_base_commit(runtime: Runtime, base_commit: str) -> None:
     logger.info(action, extra={'msg_type': 'ACTION'})
     obs = runtime.run_action(action)
     logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+    if obs.exit_code == -1:
+        _interrupt_stuck_command(runtime)
     assert_and_raise(obs.exit_code == 0, f'Failed to git gc --prune=now: {str(obs)}')
 
 
