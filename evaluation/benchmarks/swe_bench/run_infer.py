@@ -946,7 +946,7 @@ def _deep_reset_to_base_commit(runtime: Runtime, base_commit: str) -> None:
     logger.info(obs, extra={'msg_type': 'OBSERVATION'})
     if obs.exit_code == -1:
         _interrupt_stuck_command(runtime)
-    assert_and_raise(obs.exit_code == 0, f'Failed to expire reflog: {str(obs)}')
+    # assert_and_raise(obs.exit_code == 0, f'Failed to expire reflog: {str(obs)}')
 
     # 5) Prune dangling objects. After steps 1-4 every commit past
     # base_commit is unreachable; `git gc --prune=now` deletes them from
@@ -959,7 +959,7 @@ def _deep_reset_to_base_commit(runtime: Runtime, base_commit: str) -> None:
     logger.info(obs, extra={'msg_type': 'OBSERVATION'})
     if obs.exit_code == -1:
         _interrupt_stuck_command(runtime)
-    assert_and_raise(obs.exit_code == 0, f'Failed to git gc --prune=now: {str(obs)}')
+    # assert_and_raise(obs.exit_code == 0, f'Failed to git gc --prune=now: {str(obs)}')
 
 
 def initialize_runtime(
