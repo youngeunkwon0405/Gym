@@ -1132,6 +1132,13 @@ source ~/.bashrc
         # workspace with no .git directory. Bootstrap a local repo and
         # snapshot the pristine state as `swebench_baseline` so we can diff
         # the agent's changes against it in complete_runtime.
+        #
+        # The baseline_cmd below echoes a marker line so we can detect
+        # whether the repo was freshly initialized. If it was, then
+        # `instance['base_commit']` (an upstream SHA) does NOT exist in
+        # the local repo and passing it to _deep_reset_to_base_commit
+        # would fail rev-parse. In that case, the just-created HEAD is
+        # already the correct baseline (also tagged `swebench_baseline`).
         baseline_cmd = (
             f'git config --global --add safe.directory {workspace_path} && '
             f'cd {workspace_path} && '
@@ -1141,7 +1148,10 @@ source ~/.bashrc
             "  git config user.name 'OpenHands Eval' && "
             '  git add -A && '
             "  git commit -q --allow-empty -m 'swe-bench-ext baseline' && "
-            '  git tag -f swebench_baseline HEAD; '
+            '  git tag -f swebench_baseline HEAD && '
+            '  echo "__SWEBENCH_EXT_FRESH_INIT__"; '
+            'else '
+            '  echo "__SWEBENCH_EXT_PRE_EXISTING__"; '
             'fi'
         )
         action = CmdRunAction(command=baseline_cmd)
@@ -1153,9 +1163,13 @@ source ~/.bashrc
             isinstance(obs, CmdOutputObservation) and obs.exit_code == 0,
             f'Failed to set up swebench_baseline git repo: {str(obs)}',
         )
+        freshly_initialized = '__SWEBENCH_EXT_FRESH_INIT__' in obs.content
 
-        # if the base_commit is not empty, then we need to checkout the base_commit
-        if instance['base_commit']:
+        # Only deep-reset to instance['base_commit'] when the container
+        # shipped a pre-existing git history that actually contains that
+        # SHA. For freshly initialized repos, our synthetic baseline IS
+        # the only commit, and the upstream SHA is unreachable.
+        if instance['base_commit'] and not freshly_initialized:
             base_commit = instance['base_commit']
             _deep_reset_to_base_commit(runtime, base_commit)
 
