@@ -61,6 +61,8 @@ def parse_iso_timestamp(ts_str):
     """Parse ISO timestamp string to epoch seconds (float).
     Rollout timestamps are UTC; OpenHands action timestamps may omit the offset.
     """
+    if ts_str.endswith("Z"):
+        ts_str = f"{ts_str[:-1]}+00:00"
     dt = datetime.fromisoformat(ts_str)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
