@@ -172,12 +172,21 @@ def reconstruct_rollout_events(nm):
     actions = ptm["action_execution_latencies"]
     token_by_rid = {usage["response_id"]: usage for usage in ptm["token_usages"]}
 
-    llm_starts = []
-    for turn, response in enumerate(responses, start=1):
+    response_spans = []
+    for response in responses:
         timestamp = response["timestamp"]
         end = parse_iso_timestamp(timestamp)
         latency = response["latency"]
         start = end - latency
+        response_spans.append((start, end, response))
+
+    # Parallel OpenCode subagents can complete out of order. Number turns by
+    # their recorded request starts so the trace reflects launch order.
+    response_spans.sort(key=lambda span: (span[0], span[1], span[2]["response_id"]))
+
+    llm_starts = []
+    for turn, (start, _, response) in enumerate(response_spans, start=1):
+        latency = response["latency"]
         response_id = response["response_id"]
         token_usage = token_by_rid[response_id]
         metadata = {
