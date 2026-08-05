@@ -18,7 +18,7 @@ import hashlib
 import json
 import os
 from copy import deepcopy
-from time import perf_counter, time
+from time import time
 from typing import Any, ClassVar, Dict, List, Optional, Union
 
 from aiohttp.client_exceptions import ClientResponseError
@@ -457,17 +457,8 @@ class VLLMModel(SimpleResponsesAPIModel):
         if self.config.use_completions_api:
             return await self._chat_completions_via_completions_api(request, body)
 
-        route_started_at = perf_counter()
-        phase_started_at = perf_counter()
         body_dict = body.model_dump(exclude_unset=True)
-        timing_breakdown: Dict[str, Union[int, float, bool]] = {
-            "gym_body_model_dump_ms": (perf_counter() - phase_started_at) * 1000,
-            "gym_request_message_count": len(body_dict.get("messages", [])),
-        }
-
-        phase_started_at = perf_counter()
         body_dict = self._preprocess_chat_completion_create_params(request, body_dict)
-        timing_breakdown["gym_preprocess_ms"] = (perf_counter() - phase_started_at) * 1000
 
         client = self._resolve_client(request)
 
@@ -476,17 +467,11 @@ class VLLMModel(SimpleResponsesAPIModel):
             if last_message["role"] == "assistant" and not (last_message["content"] or last_message.get("tool_calls")):
                 res = self._create_empty_chat_completion()
                 res.choices[0].finish_reason = "content_filter"
-                timing_breakdown["gym_empty_assistant_rejected"] = True
-                timing_breakdown["gym_route_total_ms"] = (perf_counter() - route_started_at) * 1000
-                res.nemo_gym_timing = timing_breakdown
                 return res
 
         try:
-            phase_started_at = perf_counter()
             chat_completion_dict = await client.create_chat_completion(**body_dict)
-            timing_breakdown["gym_downstream_chat_ms"] = (perf_counter() - phase_started_at) * 1000
         except ClientResponseError as e:
-            timing_breakdown["gym_downstream_chat_ms"] = (perf_counter() - phase_started_at) * 1000
             """
             Example messages for out of context length:
 
@@ -506,22 +491,17 @@ class VLLMModel(SimpleResponsesAPIModel):
             if is_out_of_context_length:
                 res = self._create_empty_chat_completion()
                 res.choices[0].finish_reason = "length"
-                timing_breakdown["gym_context_length_rejected"] = True
-                timing_breakdown["gym_route_total_ms"] = (perf_counter() - route_started_at) * 1000
-                res.nemo_gym_timing = timing_breakdown
                 return res
             else:
                 raise e
 
         downstream_timing = chat_completion_dict.pop("nemo_rl_timing", None)
-        if isinstance(downstream_timing, dict):
-            timing_breakdown.update(
-                (key, value)
-                for key, value in downstream_timing.items()
-                if isinstance(value, (int, float, bool))
-            )
+        nemo_rl_route_total_ms = (
+            downstream_timing.get("nemo_rl_route_total_ms") if isinstance(downstream_timing, dict) else None
+        )
+        if isinstance(nemo_rl_route_total_ms, bool) or not isinstance(nemo_rl_route_total_ms, (int, float)):
+            nemo_rl_route_total_ms = None
 
-        phase_started_at = perf_counter()
         choice_dict = chat_completion_dict["choices"][0]
         if self.config.uses_reasoning_parser:
             # See the TODO wrt reasoning_content above
@@ -542,9 +522,6 @@ class VLLMModel(SimpleResponsesAPIModel):
             assert not (choice_dict["message"].get("reasoning_content") or choice_dict["message"].get("reasoning")), (
                 f"NeMo Gym server `{self.config.name}` config has explicitly been set to not use a reasoning parser i.e. `uses_reasoning_parser: false`. Please do not use a reasoning parser in your vLLM endpoint, or fix the `{self.config.name}` server config!"
             )
-
-        timing_breakdown["gym_reasoning_postprocess_ms"] = (perf_counter() - phase_started_at) * 1000
-        timing_breakdown["gym_tokenize_called"] = False
 
         if self.config.return_token_id_information and "prompt_token_ids" not in choice_dict["message"]:
             # Check vLLM honored the logprobs request.
@@ -581,10 +558,7 @@ class VLLMModel(SimpleResponsesAPIModel):
                     tokenize_body_dict[key] = body_dict[key]
 
             # The base url has /v1 at the end but vLLM's tokenize endpoint does not have v1, hence the ..
-            phase_started_at = perf_counter()
             tokenize_response = await client.create_tokenize(**tokenize_body_dict)
-            timing_breakdown["gym_tokenize_called"] = True
-            timing_breakdown["gym_tokenize_ms"] = (perf_counter() - phase_started_at) * 1000
             """
             END
             """
@@ -607,11 +581,9 @@ class VLLMModel(SimpleResponsesAPIModel):
             # chat_completion_dict.pop("prompt_token_ids")
             # choice_dict.pop("token_ids")
 
-        phase_started_at = perf_counter()
         response = NeMoGymChatCompletion.model_validate(chat_completion_dict)
-        timing_breakdown["gym_response_validation_ms"] = (perf_counter() - phase_started_at) * 1000
-        timing_breakdown["gym_route_total_ms"] = (perf_counter() - route_started_at) * 1000
-        response.nemo_gym_timing = timing_breakdown
+        if nemo_rl_route_total_ms is not None:
+            response.nemo_gym_timing = {"nemo_rl_route_total_ms": nemo_rl_route_total_ms}
         return response
 
     async def _chat_completions_via_completions_api(

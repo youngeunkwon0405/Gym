@@ -683,6 +683,38 @@ class TestApp:
     async def test_sanity(self, monkeypatch: MonkeyPatch) -> None:
         self._setup_server(monkeypatch)
 
+    def test_chat_completions_keeps_only_nemo_rl_route_total_ms(self, monkeypatch: MonkeyPatch) -> None:
+        import asyncio
+
+        server = self._setup_server(monkeypatch)
+        completion = NeMoGymChatCompletion(
+            id="chtcmpl-123",
+            object="chat.completion",
+            created=FIXED_TIME,
+            model="dummy_model",
+            choices=[
+                NeMoGymChoice(
+                    index=0,
+                    finish_reason="stop",
+                    message=NeMoGymChatCompletionMessage(role="assistant", content="done"),
+                )
+            ],
+        ).model_dump()
+        completion["nemo_rl_timing"] = {
+            "nemo_rl_route_total_ms": 123.5,
+            "nemo_rl_create_chat_completion_ms": 120.0,
+        }
+        mock_client = MagicMock(spec=NeMoGymAsyncOpenAI)
+        mock_client.create_chat_completion = AsyncMock(return_value=completion)
+        monkeypatch.setattr(server, "_resolve_client", lambda _: mock_client)
+
+        body = NeMoGymChatCompletionCreateParamsNonStreaming(
+            messages=[NeMoGymChatCompletionUserMessageParam(role="user", content="hello")]
+        )
+        result = asyncio.run(server.chat_completions(MagicMock(), body))
+
+        assert result.nemo_gym_timing == {"nemo_rl_route_total_ms": 123.5}
+
     def test_responses_multistep(self, monkeypatch: MonkeyPatch):
         server = self._setup_server(monkeypatch)
         app = server.setup_webserver()

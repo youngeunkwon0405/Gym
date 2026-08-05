@@ -305,9 +305,9 @@ def reconstruct_rollout_events(nm):
             metadata["reasoning_tokens"] = token_usage["reasoning_tokens"]
         timing_breakdown = response.get("timing_breakdown")
         if isinstance(timing_breakdown, dict):
-            for key, value in timing_breakdown.items():
-                if isinstance(value, (int, float, bool)):
-                    metadata[key] = value
+            route_total_ms = timing_breakdown.get("nemo_rl_route_total_ms")
+            if isinstance(route_total_ms, (int, float)) and not isinstance(route_total_ms, bool):
+                metadata["nemo_rl_route_total_ms"] = route_total_ms
         events.append(("llm_generation", start, duration, metadata))
         llm_starts.append(start)
 
