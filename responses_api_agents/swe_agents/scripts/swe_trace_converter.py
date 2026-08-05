@@ -308,6 +308,7 @@ def reconstruct_rollout_events(nm):
             route_total_ms = timing_breakdown.get("nemo_rl_route_total_ms")
             if isinstance(route_total_ms, (int, float)) and not isinstance(route_total_ms, bool):
                 metadata["nemo_rl_route_total_ms"] = route_total_ms
+                metadata["gym_side_additional_overhead"] = duration - route_total_ms / 1000
         events.append(("llm_generation", start, duration, metadata))
         llm_starts.append(start)
 
