@@ -747,7 +747,14 @@ def build_chrome_trace(log_dir):
             f"{stats['total_framework_overhead_time'] / n:>10.1f}s  "
             f"({100 * stats['total_framework_overhead_time'] / detailed_total_time:.1f}%)"
         )
-        cpu_time = stats["total_tool_time"] + stats["total_eval_time"]
+        cpu_time = (
+            stats["total_tool_time"]
+            + stats["total_eval_time"]
+            + stats["total_init_time"]
+            + stats["total_startup_time"]
+            + stats["total_finalization_time"]
+            + stats["total_framework_overhead_time"]
+        )
         print("  ---")
         print(
             f"  Total CPU overhead:     {cpu_time / n:>10.1f}s  "
