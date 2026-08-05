@@ -12,7 +12,7 @@ swe_agents:
       agent_max_turns: 100
       # Development pin for precise OpenCode rollout metrics.
       agent_framework_repo: https://github.com/youngeunkwon0405/nv-opencode.git
-      agent_framework_commit: d9115e5aea76d60ddb40f9702992d68a51423bb7
+      agent_framework_commit: 9b79f6c1d2555c653e4b5dd49a08d2ddbd209731
 
       # Container configuration (same SIFs as the openhands path)
       container_formatter: ???
