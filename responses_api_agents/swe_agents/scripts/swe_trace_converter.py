@@ -560,7 +560,7 @@ def build_chrome_trace(log_dir):
     # --- Process each entry ---
     rollout_count = 0
     stats = {
-        "total_agent_rollout_time": 0.0,
+        "total_fallback_rollout_time": 0.0,
         "total_llm_time": 0.0,
         "total_tool_time": 0.0,
         "total_eval_time": 0.0,
@@ -570,6 +570,8 @@ def build_chrome_trace(log_dir):
         "total_framework_overhead_time": 0.0,
         "resolved_count": 0,
         "total_count": 0,
+        "detailed_count": 0,
+        "fallback_count": 0,
     }
 
     for dir_name, data in entries:
@@ -587,6 +589,7 @@ def build_chrome_trace(log_dir):
 
         # Reconstruct events first to compute per-rollout sums
         events = entry_events[dir_name]
+        is_detailed = has_per_turn_metrics(data)
 
         rollout_llm_time = sum(dur for cat, _, dur, _ in events if cat == "llm_generation")
         rollout_tool_time = sum(
@@ -638,7 +641,9 @@ def build_chrome_trace(log_dir):
 
             # Accumulate stats
             if cat == "agent_rollout":
-                stats["total_agent_rollout_time"] += dur_s
+                stats["total_fallback_rollout_time"] += dur_s
+            elif not is_detailed:
+                continue
             elif cat == "llm_generation":
                 stats["total_llm_time"] += dur_s
             elif cat == "tool_execution" and not nested:
@@ -655,6 +660,10 @@ def build_chrome_trace(log_dir):
                 stats["total_framework_overhead_time"] += dur_s
 
         stats["total_count"] += 1
+        if is_detailed:
+            stats["detailed_count"] += 1
+        else:
+            stats["fallback_count"] += 1
         if resolved:
             stats["resolved_count"] += 1
 
@@ -682,13 +691,20 @@ def build_chrome_trace(log_dir):
     # Print summary statistics
     print("\n--- Summary Statistics (aggregated across all rollouts) ---")
     print(f"  Total rollouts: {stats['total_count']}")
+    print(f"  Detailed rollouts: {stats['detailed_count']}")
+    print(f"  Fallback-only rollouts: {stats['fallback_count']}")
     print(
         f"  Resolved: {stats['resolved_count']}/{stats['total_count']} "
         f"({100 * stats['resolved_count'] / max(stats['total_count'], 1):.1f}%)"
     )
-    total_time = (
-        stats["total_agent_rollout_time"]
-        + stats["total_llm_time"]
+    if stats["fallback_count"] > 0:
+        print(
+            f"  Avg fallback duration:  "
+            f"{stats['total_fallback_rollout_time'] / stats['fallback_count']:>10.1f}s"
+        )
+
+    detailed_total_time = (
+        stats["total_llm_time"]
         + stats["total_tool_time"]
         + stats["total_eval_time"]
         + stats["total_init_time"]
@@ -697,50 +713,49 @@ def build_chrome_trace(log_dir):
         + stats["total_framework_overhead_time"]
     )
 
-    n = max(stats["total_count"], 1)
-    if total_time > 0:
-        avg_time = total_time / n
-        print(f"  Avg per rollout:        {avg_time:>10.1f}s")
-        if stats["total_agent_rollout_time"] > 0:
-            print(
-                f"  Agent Rollout:          {stats['total_agent_rollout_time'] / n:>10.1f}s  "
-                f"({100 * stats['total_agent_rollout_time'] / total_time:.1f}%)"
-            )
+    n = max(stats["detailed_count"], 1)
+    if detailed_total_time > 0:
+        avg_time = detailed_total_time / n
+        print("  Detailed timing (fallback-only rollouts excluded):")
+        print(f"  Avg per detailed rollout:{avg_time:>9.1f}s")
         print(
             f"  LLM Generation (GPU):   {stats['total_llm_time'] / n:>10.1f}s  "
-            f"({100 * stats['total_llm_time'] / total_time:.1f}%)"
+            f"({100 * stats['total_llm_time'] / detailed_total_time:.1f}%)"
         )
         print(
             f"  Tool Execution (CPU):   {stats['total_tool_time'] / n:>10.1f}s  "
-            f"({100 * stats['total_tool_time'] / total_time:.1f}%)"
+            f"({100 * stats['total_tool_time'] / detailed_total_time:.1f}%)"
         )
         print(
             f"  Evaluation (CPU):       {stats['total_eval_time'] / n:>10.1f}s  "
-            f"({100 * stats['total_eval_time'] / total_time:.1f}%)"
+            f"({100 * stats['total_eval_time'] / detailed_total_time:.1f}%)"
         )
         print(
             f"  Agent Init:             {stats['total_init_time'] / n:>10.1f}s  "
-            f"({100 * stats['total_init_time'] / total_time:.1f}%)"
+            f"({100 * stats['total_init_time'] / detailed_total_time:.1f}%)"
         )
         print(
             f"  Agent Startup:          {stats['total_startup_time'] / n:>10.1f}s  "
-            f"({100 * stats['total_startup_time'] / total_time:.1f}%)"
+            f"({100 * stats['total_startup_time'] / detailed_total_time:.1f}%)"
         )
         print(
             f"  Agent Finalization:     {stats['total_finalization_time'] / n:>10.1f}s  "
-            f"({100 * stats['total_finalization_time'] / total_time:.1f}%)"
+            f"({100 * stats['total_finalization_time'] / detailed_total_time:.1f}%)"
         )
         print(
             f"  Framework Overhead:     "
             f"{stats['total_framework_overhead_time'] / n:>10.1f}s  "
-            f"({100 * stats['total_framework_overhead_time'] / total_time:.1f}%)"
+            f"({100 * stats['total_framework_overhead_time'] / detailed_total_time:.1f}%)"
         )
         cpu_time = stats["total_tool_time"] + stats["total_eval_time"]
         print("  ---")
-        print(f"  Total CPU overhead:     {cpu_time / n:>10.1f}s  ({100 * cpu_time / total_time:.1f}%)")
+        print(
+            f"  Total CPU overhead:     {cpu_time / n:>10.1f}s  "
+            f"({100 * cpu_time / detailed_total_time:.1f}%)"
+        )
         print(
             f"  Total GPU (LLM) time:   {stats['total_llm_time'] / n:>10.1f}s  "
-            f"({100 * stats['total_llm_time'] / total_time:.1f}%)"
+            f"({100 * stats['total_llm_time'] / detailed_total_time:.1f}%)"
         )
 
     return {"traceEvents": trace_events}
