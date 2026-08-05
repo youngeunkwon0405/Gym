@@ -747,7 +747,7 @@ def build_chrome_trace(log_dir):
             f"{stats['total_framework_overhead_time'] / n:>10.1f}s  "
             f"({100 * stats['total_framework_overhead_time'] / detailed_total_time:.1f}%)"
         )
-        cpu_time = stats["total_tool_time"] + stats["total_eval_time"]
+        cpu_core_work_time = stats["total_tool_time"] + stats["total_eval_time"]
         framework_inefficiency_time = (
             stats["total_init_time"]
             + stats["total_startup_time"]
@@ -756,8 +756,8 @@ def build_chrome_trace(log_dir):
         )
         print("  ---")
         print(
-            f"  Total CPU overhead:     {cpu_time / n:>10.1f}s  "
-            f"({100 * cpu_time / detailed_total_time:.1f}%)"
+            f"  Total CPU core work (Tool call + Eval): {cpu_core_work_time / n:>10.1f}s  "
+            f"({100 * cpu_core_work_time / detailed_total_time:.1f}%)"
         )
         print(
             f"  Total Framework inefficiency: {framework_inefficiency_time / n:>10.1f}s  "
