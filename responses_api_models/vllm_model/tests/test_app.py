@@ -52,7 +52,7 @@ from nemo_gym.openai_utils import (
     NeMoGymResponseReasoningItem,
     NeMoGymSummary,
 )
-from nemo_gym.server_utils import ServerClient
+from nemo_gym.server_utils import SESSION_ID_KEY, ServerClient
 from responses_api_models.vllm_model.app import (
     VLLMConverter,
     VLLMModel,
@@ -682,38 +682,6 @@ class TestApp:
 
     async def test_sanity(self, monkeypatch: MonkeyPatch) -> None:
         self._setup_server(monkeypatch)
-
-    def test_chat_completions_keeps_only_nemo_rl_route_total_ms(self, monkeypatch: MonkeyPatch) -> None:
-        import asyncio
-
-        server = self._setup_server(monkeypatch)
-        completion = NeMoGymChatCompletion(
-            id="chtcmpl-123",
-            object="chat.completion",
-            created=FIXED_TIME,
-            model="dummy_model",
-            choices=[
-                NeMoGymChoice(
-                    index=0,
-                    finish_reason="stop",
-                    message=NeMoGymChatCompletionMessage(role="assistant", content="done"),
-                )
-            ],
-        ).model_dump()
-        completion["nemo_rl_timing"] = {
-            "nemo_rl_route_total_ms": 123.5,
-            "nemo_rl_create_chat_completion_ms": 120.0,
-        }
-        mock_client = MagicMock(spec=NeMoGymAsyncOpenAI)
-        mock_client.create_chat_completion = AsyncMock(return_value=completion)
-        monkeypatch.setattr(server, "_resolve_client", lambda _: mock_client)
-
-        body = NeMoGymChatCompletionCreateParamsNonStreaming(
-            messages=[NeMoGymChatCompletionUserMessageParam(role="user", content="hello")]
-        )
-        result = asyncio.run(server.chat_completions(MagicMock(), body))
-
-        assert result.nemo_gym_timing == {"nemo_rl_route_total_ms": 123.5}
 
     def test_responses_multistep(self, monkeypatch: MonkeyPatch):
         server = self._setup_server(monkeypatch)
@@ -1492,7 +1460,7 @@ class TestApp:
 
         assert captured_params["value"] == expected_chat_completion_create_params
 
-    def test_client_session_routing(self, monkeypatch: MonkeyPatch):
+    def test_client_session_routing(self):
         config = VLLMModelConfig(
             host="0.0.0.0",
             port=8081,
@@ -1505,112 +1473,30 @@ class TestApp:
             uses_reasoning_parser=False,
         )
         server = VLLMModel(config=config, server_client=MagicMock(spec=ServerClient, global_config_dict={}))
-        app = server.setup_webserver()
-
         assert len(server._clients) == 2
+        clients = [MagicMock(spec=NeMoGymAsyncOpenAI), MagicMock(spec=NeMoGymAsyncOpenAI)]
+        server._clients = clients
 
-        mock_chat_completion = NeMoGymChatCompletion(
-            id="chtcmpl",
-            object="chat.completion",
-            created=FIXED_TIME,
-            model="dummy_model",
-            choices=[
-                NeMoGymChoice(
-                    index=0,
-                    finish_reason="stop",
-                    message=NeMoGymChatCompletionMessage(
-                        role="assistant",
-                        content="",
-                        tool_calls=[],
-                    ),
-                )
-            ],
-        )
+        requests = []
+        selected_clients = []
+        for index in range(100):
+            request = MagicMock()
+            request.session = {SESSION_ID_KEY: f"session-{index}"}
+            requests.append(request)
+            selected_clients.append(server._resolve_client(request))
+            if len({id(client) for client in selected_clients}) == len(clients):
+                break
 
-        input_messages = [
-            NeMoGymEasyInputMessage(
-                type="message",
-                role="user",
-                content=[NeMoGymResponseInputText(text="Check my order status", type="input_text")],
-                status="completed",
-            ),
-        ]
-        request_body = NeMoGymResponseCreateParamsNonStreaming(
-            input=input_messages,
-        )
+        assert len({id(client) for client in selected_clients}) == len(clients)
+        for request, selected_client in zip(requests, selected_clients):
+            assert server._resolve_client(request) is selected_client
 
-        mock_chat_completion_1 = mock_chat_completion.model_copy(deep=True)
-        mock_chat_completion_1.choices[0].message.content = "1"
-        mock_method_1 = AsyncMock(return_value=mock_chat_completion_1.model_dump())
-        client_1 = MagicMock(spec=NeMoGymAsyncOpenAI)
-        client_1.create_chat_completion = mock_method_1
-
-        mock_chat_completion_2 = mock_chat_completion.model_copy(deep=True)
-        mock_chat_completion_2.choices[0].message.content = "2"
-        mock_method_2 = AsyncMock(return_value=mock_chat_completion_2.model_dump())
-        client_2 = MagicMock(spec=NeMoGymAsyncOpenAI)
-        client_2.create_chat_completion = mock_method_2
-
-        server._clients = [client_1, client_2]
-
-        # Test first query by client 1 goes to underlying client 1
-        client_1 = TestClient(app)
-        response_1_1 = client_1.post(
-            "/v1/responses",
-            json=request_body.model_dump(exclude_unset=True, mode="json"),
-        )
-        assert response_1_1.status_code == 200
-        data = response_1_1.json()
-        assert data["output"][0]["content"][0]["text"] == "1"
-
-        # Test first query by client 2 goes to underlying client 2 (round robin)
-        client_2 = TestClient(app)
-        response_2_1 = client_2.post(
-            "/v1/responses",
-            json=request_body.model_dump(exclude_unset=True, mode="json"),
-        )
-        assert response_2_1.status_code == 200
-        data = response_2_1.json()
-        assert data["output"][0]["content"][0]["text"] == "2"
-
-        # Test first query by client 3 goes to underlying client 1 = 3 % 2 (round robin)
-        client_3 = TestClient(app)
-        response_3_1 = client_3.post(
-            "/v1/responses",
-            json=request_body.model_dump(exclude_unset=True, mode="json"),
-        )
-        assert response_3_1.status_code == 200
-        data = response_3_1.json()
-        assert data["output"][0]["content"][0]["text"] == "1"
-
-        # Test second query by client 1 goes to the same underlying client 1 (not round robin since we've called it before)
-        # Here, we assume that TestClient will extract and propogate the response cookies
-        response_1_2 = client_1.post(
-            "/v1/responses",
-            json=request_body.model_dump(exclude_unset=True, mode="json"),
-        )
-        assert response_1_2.status_code == 200
-        data = response_1_2.json()
-        assert data["output"][0]["content"][0]["text"] == "1"
-
-        # Test second query by client 3 goes to the same underlying client 1 (not round robin since we've called it before)
-        # We do this out of order as 1 -> 3 -> 2 instead of 1 -> 2 -> 3 to test any ordering effects.
-        response_3_2 = client_3.post(
-            "/v1/responses",
-            json=request_body.model_dump(exclude_unset=True, mode="json"),
-        )
-        assert response_3_2.status_code == 200
-        data = response_3_2.json()
-        assert data["output"][0]["content"][0]["text"] == "1"
-
-        # Test second query by client 2 goes to the same underlying client 2
-        response_2_2 = client_2.post(
-            "/v1/responses",
-            json=request_body.model_dump(exclude_unset=True, mode="json"),
-        )
-        assert response_2_2.status_code == 200
-        data = response_2_2.json()
-        assert data["output"][0]["content"][0]["text"] == "2"
+        # A separate Uvicorn worker has an independent cache but must choose the
+        # same endpoint for each session.
+        second_worker = VLLMModel(config=config, server_client=MagicMock(spec=ServerClient, global_config_dict={}))
+        second_worker._clients = clients
+        for request, selected_client in zip(requests, selected_clients):
+            assert second_worker._resolve_client(request) is selected_client
 
     def test_responses_reasoning_parser(self, monkeypatch: MonkeyPatch):
         server = self._setup_server(monkeypatch)

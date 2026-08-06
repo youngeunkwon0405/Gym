@@ -495,13 +495,6 @@ class VLLMModel(SimpleResponsesAPIModel):
             else:
                 raise e
 
-        downstream_timing = chat_completion_dict.pop("nemo_rl_timing", None)
-        nemo_rl_route_total_ms = (
-            downstream_timing.get("nemo_rl_route_total_ms") if isinstance(downstream_timing, dict) else None
-        )
-        if isinstance(nemo_rl_route_total_ms, bool) or not isinstance(nemo_rl_route_total_ms, (int, float)):
-            nemo_rl_route_total_ms = None
-
         choice_dict = chat_completion_dict["choices"][0]
         if self.config.uses_reasoning_parser:
             # See the TODO wrt reasoning_content above
@@ -581,10 +574,7 @@ class VLLMModel(SimpleResponsesAPIModel):
             # chat_completion_dict.pop("prompt_token_ids")
             # choice_dict.pop("token_ids")
 
-        response = NeMoGymChatCompletion.model_validate(chat_completion_dict)
-        if nemo_rl_route_total_ms is not None:
-            response.nemo_gym_timing = {"nemo_rl_route_total_ms": nemo_rl_route_total_ms}
-        return response
+        return NeMoGymChatCompletion.model_validate(chat_completion_dict)
 
     async def _chat_completions_via_completions_api(
         self, request: Request, body: NeMoGymChatCompletionCreateParamsNonStreaming

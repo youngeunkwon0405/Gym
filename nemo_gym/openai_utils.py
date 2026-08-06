@@ -394,7 +394,6 @@ class NeMoGymChoice(Choice):
 
 class NeMoGymChatCompletion(ChatCompletion):
     choices: List[NeMoGymChoice]
-    nemo_gym_timing: Optional[Dict[str, float]] = None
 
 
 ########################################
